@@ -3,7 +3,6 @@ mod sat;
 
 use sat::{SATSolver, SATSolverResult};
 
-
 // fn print_sat_problem(problem: &SATProblem) {
 //     for clause in problem.clauses.iter() {
 //         let mut first = true;
@@ -19,10 +18,7 @@ use sat::{SATSolver, SATSolverResult};
 //     }
 // }
 
-
 fn main() {
-
-
     let problem = sat::read_cnf(std::io::BufReader::new(std::io::stdin()));
     // print_sat_problem(&problem);
 
@@ -48,10 +44,9 @@ fn main() {
                 }
             }
             println!("SATISFIABLE");
-        },
+        }
         SATSolverResult::Unsatisfiable => {
             println!("UNSATISFIABLE");
         }
     }
-
 }

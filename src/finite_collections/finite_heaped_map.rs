@@ -1,13 +1,12 @@
 use std::{cmp::Ordering, marker::PhantomData};
 
-
 pub trait Comparator<V> {
     fn compare(lhs: &(usize, V), rhs: &(usize, V)) -> Ordering;
 }
 
-
 pub struct FiniteHeapedMap<V, F>
-    where F: Comparator<V>
+where
+    F: Comparator<V>,
 {
     heap_array: Vec<(usize, V)>,
     position_array: Vec<usize>,
@@ -15,21 +14,18 @@ pub struct FiniteHeapedMap<V, F>
 }
 
 impl<V, F> Default for FiniteHeapedMap<V, F>
-    where F: Comparator<V>
+where
+    F: Comparator<V>,
 {
     #[inline(never)]
     fn default() -> Self {
-        FiniteHeapedMap {
-            heap_array: Vec::default(),
-            position_array: Vec::default(),
-            _phantom: PhantomData,
-        }        
+        FiniteHeapedMap { heap_array: Vec::default(), position_array: Vec::default(), _phantom: PhantomData }
     }
 }
 
-
 impl<V, F> FiniteHeapedMap<V, F>
-    where F: Comparator<V> // TODO: Comparator ではなく GetSortKey とかの方がいいかも(MEMO: その場合弱順序対応に注意)
+where
+    F: Comparator<V>, // TODO: Comparator ではなく GetSortKey とかの方がいいかも(MEMO: その場合弱順序対応に注意)
 {
     const NULL_POSITION: usize = usize::MAX;
 
@@ -137,11 +133,13 @@ impl<V, F> FiniteHeapedMap<V, F>
         }
     }
 
-// private:
+    // private:
 
     #[inline(never)]
     fn update(&mut self, position: usize) {
-        if position != 0 && F::compare(&self.heap_array[(position + 1) / 2 - 1], &self.heap_array[position]) == Ordering::Greater {
+        if position != 0
+            && F::compare(&self.heap_array[(position + 1) / 2 - 1], &self.heap_array[position]) == Ordering::Greater
+        {
             self.up_heap(position);
         } else {
             self.down_heap(position);
@@ -176,7 +174,9 @@ impl<V, F> FiniteHeapedMap<V, F>
                 break;
             }
             let smaller_child;
-            if right >= self.heap_array.len() || F::compare(&self.heap_array[left], &self.heap_array[right]) == Ordering::Less {
+            if right >= self.heap_array.len()
+                || F::compare(&self.heap_array[left], &self.heap_array[right]) == Ordering::Less
+            {
                 smaller_child = left;
             } else {
                 smaller_child = right
@@ -185,11 +185,9 @@ impl<V, F> FiniteHeapedMap<V, F>
                 self.heap_array.swap(current, smaller_child);
                 self.position_array.swap(self.heap_array[current].0, self.heap_array[smaller_child].0);
                 current = smaller_child;
-            }else{
+            } else {
                 break;
             }
         }
     }
-
 }
-

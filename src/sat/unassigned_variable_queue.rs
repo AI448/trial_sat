@@ -1,5 +1,3 @@
-
-
 use super::super::finite_collections::finite_heaped_map::Comparator;
 use super::super::finite_collections::finite_heaped_map::FiniteHeapedMap;
 
@@ -8,11 +6,10 @@ pub struct UnassignedVariableQueue {
     time_constant: f64,
     increase_value: f64,
     activities: Vec<f64>,
-    queue: FiniteHeapedMap<f64, UnassignedVariableComparator>
+    queue: FiniteHeapedMap<f64, UnassignedVariableComparator>,
 }
 
 impl UnassignedVariableQueue {
-
     pub fn new(time_constant: f64) -> Self {
         UnassignedVariableQueue {
             time_constant: time_constant,
@@ -44,7 +41,7 @@ impl UnassignedVariableQueue {
     pub fn pop_first(&mut self) -> Option<usize> {
         match self.queue.pop_first() {
             Some((variable_index, ..)) => Some(variable_index),
-            None => None
+            None => None,
         }
     }
 
@@ -70,13 +67,11 @@ impl UnassignedVariableQueue {
             }
         }
     }
-
 }
 
 pub struct UnassignedVariableComparator {}
 
 impl Comparator<f64> for UnassignedVariableComparator {
-
     #[inline(always)]
     fn compare(lhs: &(usize, f64), rhs: &(usize, f64)) -> std::cmp::Ordering {
         rhs.1.partial_cmp(&lhs.1).unwrap()

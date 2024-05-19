@@ -1,29 +1,17 @@
-
 use super::types::Literal;
-
 
 /// 割り当て理由
 #[derive(Clone, Copy)]
 pub enum Reason {
     Decision,
-    Propagation {
-        clause_index: usize,
-        assignment_level_at_propagated: usize,
-    },
+    Propagation { clause_index: usize, assignment_level_at_propagated: usize },
 }
 
 /// 変数の状態
 // NOTE: 廃止するかも
 pub enum VariableState {
-    Assigned {
-        value: bool,
-        decision_level: usize,
-        assignment_level: usize,
-        reason: Reason,
-    },
-    Unassigned {
-        last_assigned_value: bool,
-    },
+    Assigned { value: bool, decision_level: usize, assignment_level: usize, reason: Reason },
+    Unassigned { last_assigned_value: bool },
 }
 
 /// 変数の割り当て状態を管理する
@@ -35,16 +23,11 @@ pub struct VariableManager {
 
 impl Default for VariableManager {
     fn default() -> Self {
-        VariableManager {
-            decision_level: 0,
-            assignment_infos: vec![],
-            variable_infos: vec![],
-        }
+        VariableManager { decision_level: 0, assignment_infos: vec![], variable_infos: vec![] }
     }
 }
 
 impl VariableManager {
-
     pub fn number_of_variables(&self) -> usize {
         self.variable_infos.len()
     }
@@ -66,13 +49,10 @@ impl VariableManager {
     }
 
     pub fn expand(&mut self, additional: usize) {
-        self.variable_infos.resize_with(
-            self.variable_infos.len() + additional,
-            || VariableInfo {
-                value: false,
-                assignment_level: VariableInfo::NULL_ASSIGNMENT_LEVEL,
-            }
-        );
+        self.variable_infos.resize_with(self.variable_infos.len() + additional, || VariableInfo {
+            value: false,
+            assignment_level: VariableInfo::NULL_ASSIGNMENT_LEVEL,
+        });
     }
 
     pub fn is_assigned(&self, literal: Literal) -> bool {
@@ -93,9 +73,7 @@ impl VariableManager {
         // TODO: 検討． is_* 系を実装するならこの関数は不要では？ get_assignment_info, get_last_assigned_value に分けてもいい気がする．
         let variable_info = &self.variable_infos[index];
         if variable_info.assignment_level == VariableInfo::NULL_ASSIGNMENT_LEVEL {
-            VariableState::Unassigned {
-                last_assigned_value: variable_info.value,
-            }
+            VariableState::Unassigned { last_assigned_value: variable_info.value }
         } else {
             let assignment_info = &self.assignment_infos[variable_info.assignment_level - 1];
             VariableState::Assigned {
