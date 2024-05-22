@@ -1,5 +1,5 @@
-use super::super::finite_collections::finite_heaped_map::Comparator;
-use super::super::finite_collections::finite_heaped_map::FiniteHeapedMap;
+use super::super::finite_collections::Comparator;
+use super::super::finite_collections::FiniteHeapedMap;
 
 /// 未割り当て変数の優先度付きキュー
 pub struct UnassignedVariableQueue {

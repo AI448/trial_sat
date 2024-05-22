@@ -1,5 +1,4 @@
-use crate::finite_collections::finite_heaped_map;
-use crate::finite_collections::FiniteHeapedMap;
+use crate::finite_collections;
 
 use super::clause_theory::ClauseTheory;
 use super::tentative_assigned_variable_queue::TentativeAssignedVariableQueue;
@@ -32,7 +31,7 @@ pub struct SATSolver {
     clause_theory: ClauseTheory,
     // TODO これが必要になるなら analyze も別の構造体とした方がよいか
     literal_buffer: Vec<Literal>,
-    analyzer_buffer: FiniteHeapedMap<AnalyzerBufferValue, AnalyzerBufferComparator>,
+    analyzer_buffer: finite_collections::FiniteHeapedMap<AnalyzerBufferValue, AnalyzerBufferComparator>,
     conflict_count: usize,
     restart_count: usize,
 }
@@ -44,9 +43,9 @@ impl SATSolver {
             variable_manager: VariableManager::default(),
             tentative_assigned_variable_queue: TentativeAssignedVariableQueue::default(),
             unassigned_variable_queue: UnassignedVariableQueue::new(1e5),
-            clause_theory: ClauseTheory::new(),
+            clause_theory: ClauseTheory::new(1e4),
             literal_buffer: Vec::default(),
-            analyzer_buffer: FiniteHeapedMap::default(),
+            analyzer_buffer: finite_collections::FiniteHeapedMap::default(),
             conflict_count: 0usize,
             restart_count: 0usize,
         }
@@ -90,7 +89,7 @@ impl SATSolver {
     #[inline(never)]
     pub fn solve(&mut self) -> SATSolverResult {
         loop {
-            let search_result = self.search(100 * Self::luby(self.restart_count) + self.restart_count);
+            let search_result = self.search();
             match search_result {
                 SearchResult::Satisfiable => {
                     let mut solution = Vec::default();
@@ -107,15 +106,14 @@ impl SATSolver {
                     return SATSolverResult::Unsatisfiable;
                 }
                 SearchResult::Undefined => {
-                    self.restart_count += 1;
-                    // TODO 学習節の削減
+                    unreachable!();
                 }
             }
         }
     }
 
     #[inline(never)]
-    fn search(&mut self, conflict_count_limit: usize) -> SearchResult {
+    fn search(&mut self) -> SearchResult {
         loop {
             let propagation_result = self.propagate();
             if let PropagationResult::Conflict { variable_index, reasons } = propagation_result {
@@ -142,15 +140,18 @@ impl SATSolver {
                 );
                 // 時刻を 1 つ進める(内部でアクティビティの指数平滑化を行っているため)
                 self.unassigned_variable_queue.advance_time();
+                self.clause_theory.advance_time();
             } else if self.variable_manager.number_of_unassigned_variables() == 0 {
                 // 未割り当ての変数がなくなれば充足可能
                 return SearchResult::Satisfiable;
-            } else if self.conflict_count >= conflict_count_limit {
+            } else if self.clause_theory.is_request_restart() {
                 // 矛盾回数が閾値に達したらリスタート
                 if self.variable_manager.current_decision_level() != 0 {
                     self.backjump(0);
                 }
-                return SearchResult::Undefined;
+                eprintln!("restart_count={} conflict_count={}", self.restart_count, self.conflict_count);
+                self.restart_count += 1;
+                self.clause_theory.restart(&self.variable_manager);
             } else {
                 // 決定変数を選択
                 self.decide();
@@ -159,25 +160,10 @@ impl SATSolver {
     }
 
     #[inline(never)]
-    pub fn summary(&self) -> usize {
+    pub fn summary(&self) -> (usize, usize, usize, usize) {
         // TODO: 各種サマリを返せるようにしたい & 計算途中にコールバック関数でも返せるようにしたい
-        self.conflict_count
-    }
-
-    #[inline(never)]
-    fn luby(i: usize) -> usize {
-        let mut j = i + 1;
-        let mut p = 2usize;
-        while j > p - 1 {
-            p *= 2;
-        }
-        while j != p - 1 {
-            j = j - p / 2 + 1;
-            while p / 2 > j {
-                p /= 2;
-            }
-        }
-        p / 2
+        let s = self.clause_theory.summary();
+        (s.0, s.1,  self.conflict_count, self.restart_count)
     }
 
     #[inline(never)]
@@ -320,8 +306,10 @@ impl SATSolver {
                     let mut learnt_clause = Vec::default();
                     for (variable_index, buffer_value) in self.analyzer_buffer.iter() {
                         learnt_clause.push(Literal { index: *variable_index, sign: buffer_value.sign });
-                        // 学習節に含まれる変数のアクティビティを増大
-                        self.unassigned_variable_queue.increase_activity(*variable_index);
+                    }
+                    // 学習節に含まれる変数のアクティビティを増大                    
+                    for literal in learnt_clause.iter() {
+                        self.unassigned_variable_queue.increase_activity(literal.index);
                     }
                     return (*second_largest_decision_level, learnt_clause);
                 }
@@ -347,7 +335,7 @@ struct AnalyzerBufferValue {
 
 struct AnalyzerBufferComparator {}
 
-impl finite_heaped_map::Comparator<AnalyzerBufferValue> for AnalyzerBufferComparator {
+impl finite_collections::Comparator<AnalyzerBufferValue> for AnalyzerBufferComparator {
     #[inline(always)]
     fn compare(lhs: &(usize, AnalyzerBufferValue), rhs: &(usize, AnalyzerBufferValue)) -> std::cmp::Ordering {
         rhs.1.assignment_level.cmp(&lhs.1.assignment_level)

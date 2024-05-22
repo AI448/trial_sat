@@ -1,7 +1,8 @@
-use super::super::finite_collections::finite_heaped_map::Comparator;
+use super::super::finite_collections::Comparator;
 use super::super::finite_collections::FiniteHeapedMap;
 use super::variable_manager::Reason;
 use std::cmp::Ordering;
+
 
 /// 仮割当変数の優先度付きキュー
 /// 矛盾の検知もこの構造体で行う

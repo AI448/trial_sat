@@ -28,22 +28,28 @@ impl Default for VariableManager {
 }
 
 impl VariableManager {
+
+    #[inline(always)]
     pub fn number_of_variables(&self) -> usize {
         self.variable_infos.len()
     }
 
+    #[inline(always)]
     pub fn number_of_assigned_variables(&self) -> usize {
         self.assignment_infos.len()
     }
 
+    #[inline(always)]
     pub fn number_of_unassigned_variables(&self) -> usize {
         self.variable_infos.len() - self.assignment_infos.len()
     }
 
+    #[inline(always)]
     pub fn current_decision_level(&self) -> usize {
         self.decision_level
     }
 
+    #[inline(always)]
     pub fn current_assignment_level(&self) -> usize {
         self.assignment_infos.len()
     }
@@ -55,20 +61,24 @@ impl VariableManager {
         });
     }
 
+    #[inline(always)]
     pub fn is_assigned(&self, literal: Literal) -> bool {
         self.variable_infos[literal.index].assignment_level != VariableInfo::NULL_ASSIGNMENT_LEVEL
     }
 
+    #[inline(always)]
     pub fn is_true(&self, literal: Literal) -> bool {
         let variable_info = &self.variable_infos[literal.index];
         variable_info.assignment_level != VariableInfo::NULL_ASSIGNMENT_LEVEL && variable_info.value == literal.sign
     }
 
+    #[inline(always)]
     pub fn is_false(&self, literal: Literal) -> bool {
         let variable_info = &self.variable_infos[literal.index];
         variable_info.assignment_level != VariableInfo::NULL_ASSIGNMENT_LEVEL && variable_info.value == !literal.sign
     }
 
+    #[inline(always)]
     pub fn get_state(&self, index: usize) -> VariableState {
         // TODO: 検討． is_* 系を実装するならこの関数は不要では？ get_assignment_info, get_last_assigned_value に分けてもいい気がする．
         let variable_info = &self.variable_infos[index];
@@ -85,6 +95,7 @@ impl VariableManager {
         }
     }
 
+    #[inline(always)]
     pub fn assign(&mut self, variable_index: usize, value: bool, reason: Reason) {
         let variable_info = &mut self.variable_infos[variable_index];
         assert!(variable_info.assignment_level == VariableInfo::NULL_ASSIGNMENT_LEVEL);
@@ -101,6 +112,7 @@ impl VariableManager {
         variable_info.assignment_level = assignment_level;
     }
 
+    #[inline(always)]
     pub fn unassign(&mut self) -> usize {
         assert!(!self.assignment_infos.is_empty());
         let assignment_info = self.assignment_infos.pop().unwrap();

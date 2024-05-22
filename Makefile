@@ -1,6 +1,6 @@
 .PHONY: target/release/trial_sat target/debug/trial_sat test
 
-all: target/release/trial_sat debug/trial_sat
+all: target/release/trial_sat target/debug/trial_sat
 
 target/release/trial_sat:
 	cargo build --release

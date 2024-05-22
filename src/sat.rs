@@ -5,6 +5,7 @@ mod tentative_assigned_variable_queue;
 mod types;
 mod unassigned_variable_queue;
 mod variable_manager;
+mod calculate_pseudo_lbd;
 
 pub use read_cnf::read_cnf;
 

@@ -20,6 +20,7 @@ def execute_trial_sat(instance_file_path: str, log_file_path: str):
         result = subprocess.run(
             ["../target/release/trial_sat"],
             stdin=open(instance_file_path),
+            # NOTE: バッファリングの方法次第では，log_file の末尾に status が出力される保証がないので，このやり方はまずいかも
             stdout=log_file,
             stderr=log_file,
             timeout=60,
@@ -27,7 +28,7 @@ def execute_trial_sat(instance_file_path: str, log_file_path: str):
     except subprocess.TimeoutExpired:
         status = "TIMEOUT"
     else:
-        status = open(log_file_path).read().rstrip()
+        status = open(log_file_path).readlines()[-1].rstrip()
 
     end_time = time.time()
     log_file.close()
