@@ -3,7 +3,6 @@ use super::super::finite_collections::FiniteHeapedMap;
 use super::variable_manager::Reason;
 use std::cmp::Ordering;
 
-
 /// 仮割当変数の優先度付きキュー
 /// 矛盾の検知もこの構造体で行う
 #[derive(Default)]
@@ -58,12 +57,8 @@ impl TentativeAssignedVariableQueue {
                 == Ordering::Less
             {
                 // reason の順序が original よりも前である場合にはキューの内容を更新
-                let new_reasons;
-                if value == false {
-                    new_reasons = [reason, original_reasons[1].clone()];
-                } else {
-                    new_reasons = [original_reasons[0].clone(), reason];
-                }
+                let new_reasons =
+                    if value == false { [reason, original_reasons[1]] } else { [original_reasons[0], reason] };
                 self.conflicting_variables.insert(variable_index, new_reasons);
             }
         } else {
@@ -73,11 +68,10 @@ impl TentativeAssignedVariableQueue {
                 let (original_value, original_reason) = self.consistent_variables.get(variable_index).unwrap();
                 if *original_value != value {
                     // 矛盾が発生する場合には conflicting_variables に変数を追加して sonsistent_variables からは削除
-                    if value == false {
-                        self.conflicting_variables.insert(variable_index, [reason, original_reason.clone()]);
-                    } else {
-                        self.conflicting_variables.insert(variable_index, [original_reason.clone(), reason]);
-                    }
+                    self.conflicting_variables.insert(
+                        variable_index,
+                        if value == false { [reason, *original_reason] } else { [*original_reason, reason] },
+                    );
                     self.consistent_variables.remove(variable_index);
                 } else if TentativeAssignedVariableComparator::compare(&reason, &original_reason) == Ordering::Less {
                     // 矛盾が発生せず reason の順序が original よりも前である場合にはキューの内容を更新

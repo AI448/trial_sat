@@ -160,10 +160,10 @@ impl SATSolver {
     }
 
     #[inline(never)]
-    pub fn summary(&self) -> (usize, usize, usize, usize) {
+    pub fn summary(&self) -> (usize, usize, usize, usize, usize) {
         // TODO: 各種サマリを返せるようにしたい & 計算途中にコールバック関数でも返せるようにしたい
         let s = self.clause_theory.summary();
-        (s.0, s.1,  self.conflict_count, self.restart_count)
+        (s.0, s.1, s.2, self.conflict_count, self.restart_count)
     }
 
     #[inline(never)]
@@ -214,7 +214,7 @@ impl SATSolver {
                 // 矛盾が発生していれば矛盾している変数を 1 つ選んで返す
                 let (variable_index, reasons) =
                     self.tentative_assigned_variable_queue.iter_conflicting_variables().next().unwrap();
-                return PropagationResult::Conflict { variable_index: *variable_index, reasons: reasons.clone() };
+                return PropagationResult::Conflict { variable_index: *variable_index, reasons: *reasons };
             }
             // 伝播によって仮割り当てされた変数のうち最も優先度の高いものを取り出す
             let (variable_index, value, reason) =
@@ -307,7 +307,7 @@ impl SATSolver {
                     for (variable_index, buffer_value) in self.analyzer_buffer.iter() {
                         learnt_clause.push(Literal { index: *variable_index, sign: buffer_value.sign });
                     }
-                    // 学習節に含まれる変数のアクティビティを増大                    
+                    // 学習節に含まれる変数のアクティビティを増大
                     for literal in learnt_clause.iter() {
                         self.unassigned_variable_queue.increase_activity(literal.index);
                     }

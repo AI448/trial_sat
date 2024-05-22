@@ -15,20 +15,14 @@ pub enum VariableState {
 }
 
 /// 変数の割り当て状態を管理する
+#[derive(Default)]
 pub struct VariableManager {
     decision_level: usize,
     assignment_infos: Vec<AssignmentInfo>,
     variable_infos: Vec<VariableInfo>,
 }
 
-impl Default for VariableManager {
-    fn default() -> Self {
-        VariableManager { decision_level: 0, assignment_infos: vec![], variable_infos: vec![] }
-    }
-}
-
 impl VariableManager {
-
     #[inline(always)]
     pub fn number_of_variables(&self) -> usize {
         self.variable_infos.len()
@@ -68,14 +62,14 @@ impl VariableManager {
 
     #[inline(always)]
     pub fn is_true(&self, literal: Literal) -> bool {
-        let variable_info = &self.variable_infos[literal.index];
-        variable_info.assignment_level != VariableInfo::NULL_ASSIGNMENT_LEVEL && variable_info.value == literal.sign
+        self.variable_infos[literal.index].assignment_level != VariableInfo::NULL_ASSIGNMENT_LEVEL
+            && self.variable_infos[literal.index].value == literal.sign
     }
 
     #[inline(always)]
     pub fn is_false(&self, literal: Literal) -> bool {
-        let variable_info = &self.variable_infos[literal.index];
-        variable_info.assignment_level != VariableInfo::NULL_ASSIGNMENT_LEVEL && variable_info.value == !literal.sign
+        self.variable_infos[literal.index].assignment_level != VariableInfo::NULL_ASSIGNMENT_LEVEL
+            && self.variable_infos[literal.index].value == !literal.sign
     }
 
     #[inline(always)]
@@ -90,7 +84,7 @@ impl VariableManager {
                 value: variable_info.value,
                 assignment_level: variable_info.assignment_level,
                 decision_level: assignment_info.decision_level,
-                reason: assignment_info.reason.clone(),
+                reason: assignment_info.reason,
             }
         }
     }

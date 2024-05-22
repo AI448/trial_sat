@@ -28,7 +28,10 @@ fn main() {
     }
     let result = solver.solve();
     let summary = solver.summary();
-    eprintln!("check_count={}, propagation_count={}, conflict_count={} restart_count={}", summary.0, summary.1, summary.2, summary.3);
+    eprintln!(
+        "check_count={}, skip_count={}, propagation_count={}, conflict_count={} restart_count={}",
+        summary.0, summary.1, summary.2, summary.3, summary.4
+    );
     match result {
         SATSolverResult::Satisfiable { solution } => {
             // チェック

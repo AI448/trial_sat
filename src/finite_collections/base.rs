@@ -1,6 +1,5 @@
 use std::{cmp::Ordering, marker::PhantomData};
 
-
 pub trait Comparator<V> {
     fn compare(lhs: &(usize, V), rhs: &(usize, V)) -> Ordering;
 }
@@ -22,7 +21,7 @@ where
 
 impl<V, S> Default for Base<V, S>
 where
-    S: Sort<V>
+    S: Sort<V>,
 {
     #[inline(never)]
     fn default() -> Self {
@@ -32,7 +31,7 @@ where
 
 impl<V, S> Base<V, S>
 where
-    S: Sort<V>
+    S: Sort<V>,
 {
     const NULL_POSITION: usize = usize::MAX;
 
@@ -140,24 +139,19 @@ where
             Some(value)
         }
     }
-
 }
-
 
 pub struct NotSort<V> {
     phantom: PhantomData<V>,
 }
 
 impl<V> Default for NotSort<V> {
-
     fn default() -> Self {
-        NotSort {phantom: PhantomData}
+        NotSort { phantom: PhantomData }
     }
-
 }
 
 impl<V> Sort<V> for NotSort<V> {
-
     #[inline(always)]
     fn update(&self, _: &mut Vec<(usize, V)>, _: &mut Vec<usize>, _: usize) {}
 
@@ -166,26 +160,32 @@ impl<V> Sort<V> for NotSort<V> {
 
     #[inline(always)]
     fn down_heap(&self, _: &mut Vec<(usize, V)>, _: &mut Vec<usize>, _: usize) {}
-
 }
 
-pub struct CustomSort<V, C> where C: Comparator<V> {
+pub struct CustomSort<V, C>
+where
+    C: Comparator<V>,
+{
     phantom_v: PhantomData<V>,
     phantom_c: PhantomData<C>,
 }
 
-impl<V, C> Default for CustomSort<V, C> where C: Comparator<V>{
+impl<V, C> Default for CustomSort<V, C>
+where
+    C: Comparator<V>,
+{
     fn default() -> Self {
-        CustomSort {phantom_v: PhantomData, phantom_c: PhantomData}
+        CustomSort { phantom_v: PhantomData, phantom_c: PhantomData }
     }
 }
 
-impl<V, C> Sort<V> for CustomSort<V, C> where C: Comparator<V> {
-
+impl<V, C> Sort<V> for CustomSort<V, C>
+where
+    C: Comparator<V>,
+{
     #[inline(always)]
     fn update(&self, heap_array: &mut Vec<(usize, V)>, position_array: &mut Vec<usize>, position: usize) {
-        if position != 0
-            && C::compare(&heap_array[(position + 1) / 2 - 1], &heap_array[position]) == Ordering::Greater
+        if position != 0 && C::compare(&heap_array[(position + 1) / 2 - 1], &heap_array[position]) == Ordering::Greater
         {
             self.up_heap(heap_array, position_array, position);
         } else {
@@ -220,14 +220,12 @@ impl<V, C> Sort<V> for CustomSort<V, C> where C: Comparator<V> {
             if left >= heap_array.len() {
                 break;
             }
-            let smaller_child;
-            if right >= heap_array.len()
-                || C::compare(&heap_array[left], &heap_array[right]) == Ordering::Less
-            {
-                smaller_child = left;
-            } else {
-                smaller_child = right
-            }
+            let smaller_child =
+                if right >= heap_array.len() || C::compare(&heap_array[left], &heap_array[right]) == Ordering::Less {
+                    left
+                } else {
+                    right
+                };
             if C::compare(&heap_array[current], &heap_array[smaller_child]) == Ordering::Greater {
                 heap_array.swap(current, smaller_child);
                 position_array.swap(heap_array[current].0, heap_array[smaller_child].0);
@@ -238,7 +236,6 @@ impl<V, C> Sort<V> for CustomSort<V, C> where C: Comparator<V> {
         }
     }
 }
-
 
 pub type FiniteHeapedMap<V, C> = Base<V, CustomSort<V, C>>;
 

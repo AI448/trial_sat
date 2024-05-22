@@ -1,20 +1,16 @@
 use super::base;
 
-
-
 pub struct Set {
     map: base::Base<(), base::NotSort<()>>,
 }
 
 impl Default for Set {
-
     fn default() -> Self {
-        Set{map: base::Base::default()}
+        Set { map: base::Base::default() }
     }
 }
 
 impl Set {
-
     pub fn capacity(&self) -> usize {
         self.map.capacity()
     }
@@ -50,6 +46,4 @@ impl Set {
     pub fn remove(&mut self, index: usize) {
         self.map.remove(index);
     }
-
-
 }

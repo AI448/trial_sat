@@ -2,7 +2,7 @@
 mod base;
 mod set;
 
-pub use base::FiniteHeapedMap;
 pub use base::Comparator;
+pub use base::FiniteHeapedMap;
 
 pub use set::Set;

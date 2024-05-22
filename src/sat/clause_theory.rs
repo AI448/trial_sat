@@ -1,13 +1,13 @@
 use std::collections::VecDeque;
 
+use super::calculate_pseudo_lbd::CalculatePseudoLBD;
 use super::tentative_assigned_variable_queue::TentativeAssignedVariableQueue;
 use super::types::Literal;
 use super::variable_manager::Reason;
 use super::variable_manager::VariableManager;
 use super::variable_manager::VariableState;
-use super::calculate_pseudo_lbd::CalculatePseudoLBD;
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct WatchedBy {
     clause_index: usize,
     watching_position: usize,
@@ -33,6 +33,7 @@ pub struct ClauseTheory {
     current_plbd_ammount: u64,
     current_plbd_deque: VecDeque<u64>,
     check_count: usize,
+    skip_count: usize,
     propagation_count: usize,
     clause_reduction_count: usize,
 }
@@ -49,7 +50,8 @@ impl ClauseTheory {
             plbd_ammount: 0,
             current_plbd_ammount: 0,
             current_plbd_deque: VecDeque::default(),
-            check_count: usize::default(),
+            check_count: 0,
+            skip_count: 0,
             propagation_count: 0,
             clause_reduction_count: 0,
         }
@@ -100,8 +102,7 @@ impl ClauseTheory {
             });
             assert!(variable_manager.is_true(literals[0]) || !variable_manager.is_assigned(literals[0]));
             // 先頭の 2 つを監視リテラルに
-            for k in 0..2 {
-                let literal = &literals[k];
+            for (k, literal) in literals.iter().enumerate().take(2) {
                 self.watched_infos[literal.index][1 - (literal.sign as usize)]
                     .push(WatchedBy { clause_index: clause_index, watching_position: k });
             }
@@ -138,7 +139,13 @@ impl ClauseTheory {
             plbd = 0;
         }
         // 節を追加
-        self.clause_infos.push(Clause { literals: literals, is_learnt: is_learnt, plbd, is_deleted: false , activity: self.activity_increase_value});
+        self.clause_infos.push(Clause {
+            literals: literals,
+            is_learnt: is_learnt,
+            plbd,
+            is_deleted: false,
+            activity: self.activity_increase_value,
+        });
     }
 
     pub fn inform_assignment(
@@ -158,30 +165,30 @@ impl ClauseTheory {
         'loop_watching_clause: while k < self.watched_infos[assigned_variable_index][assigned_value as usize].len() {
             self.check_count += 1;
             let WatchedBy { clause_index, watching_position } =
-                self.watched_infos[assigned_variable_index][assigned_value as usize][k].clone();
+                self.watched_infos[assigned_variable_index][assigned_value as usize][k];
             // println!("c{}", clause_index);
-            assert!(watching_position < 2);
+            debug_assert!(watching_position < 2);
             let clause = &mut self.clause_infos[clause_index];
             let watched_literal = clause.literals[watching_position];
-            assert!(watched_literal.index == assigned_variable_index);
-            assert!(watched_literal.sign == !assigned_value);
+            debug_assert!(watched_literal.index == assigned_variable_index);
+            debug_assert!(watched_literal.sign == !assigned_value);
             let another_watched_literal = clause.literals[1 - watching_position];
-            assert!(!variable_manager.is_false(another_watched_literal)); // 既に false が割り当てられていることはないはず
+            debug_assert!(!variable_manager.is_false(another_watched_literal)); // 既に false が割り当てられていることはないはず
             if variable_manager.is_true(another_watched_literal) {
                 // もう一方の監視リテラルに真が割り当てられており既に充足されているのでなにもしない
+                self.skip_count += 1;
             } else {
                 // 監視対象ではないリテラルを走査
-                for l in 2..clause.literals.len() {
-                    let literal = clause.literals[l];
-                    if !variable_manager.is_false(literal) {
+                for (l, literal) in clause.literals.iter().enumerate().skip(2) {
+                    if !variable_manager.is_false(*literal) {
                         // 真が割り当てられているまたは未割り当てのリテラルを発見した場合
-                        // 発見したリテラルを監視位置に移動
-                        clause.literals.swap(watching_position, l);
                         // 元の監視リテラルの監視を解除
                         self.watched_infos[watched_literal.index][!watched_literal.sign as usize].swap_remove(k);
                         // 発見したリテラルを監視
                         self.watched_infos[literal.index][!literal.sign as usize]
                             .push(WatchedBy { clause_index: clause_index, watching_position });
+                        // 発見したリテラルを監視位置に移動
+                        clause.literals.swap(watching_position, l);
                         // 次の節へ
                         continue 'loop_watching_clause;
                     }
@@ -237,30 +244,33 @@ impl ClauseTheory {
         } else {
             let pseudo_lbd_average = self.plbd_ammount as f64 / self.number_of_learnt_clauses as f64;
             let current_pseudo_lbd_average = self.current_plbd_ammount as f64 / 50.0;
-            self.number_of_learnt_clauses > 10000 + 1000 * (self.clause_reduction_count + 1) || current_pseudo_lbd_average * 0.9 > pseudo_lbd_average
+            self.number_of_learnt_clauses > 10000 + 1000 * (self.clause_reduction_count + 1)
+                || current_pseudo_lbd_average * 0.9 > pseudo_lbd_average
         }
     }
 
     pub fn restart(&mut self, variable_manager: &VariableManager) {
         assert!(variable_manager.current_decision_level() == 0);
-        eprintln!("pldb_average={} current_pldb_average={}", self.plbd_ammount as f64 / self.number_of_learnt_clauses as f64, self.current_plbd_ammount as f64 / 50.0);
+        eprintln!(
+            "pldb_average={} current_pldb_average={}",
+            self.plbd_ammount as f64 / self.number_of_learnt_clauses as f64,
+            self.current_plbd_ammount as f64 / 50.0
+        );
         self.current_plbd_ammount = 0;
-        self.current_plbd_deque.clear();        
+        self.current_plbd_deque.clear();
         if self.number_of_learnt_clauses > 10000 + 1000 * self.clause_reduction_count {
             self.clause_reduction_count += 1;
             let mut clause_priority_order = Vec::from_iter(
                 (0..self.clause_infos.len())
-                .filter(|i| self.clause_infos[*i].is_learnt && !self.clause_infos[*i].is_deleted)
+                    .filter(|i| self.clause_infos[*i].is_learnt && !self.clause_infos[*i].is_deleted),
             );
             debug_assert!(clause_priority_order.len() == self.number_of_learnt_clauses);
             // 削除の優先度の高い順にソート
-            clause_priority_order.sort_unstable_by(
-                |l, r| {
-                    let lhs = (3 - self.clause_infos[*l].plbd.min(3), self.clause_infos[*l].activity);
-                    let rhs = (3 - self.clause_infos[*r].plbd.min(3), self.clause_infos[*r].activity);
-                    lhs.partial_cmp(&rhs).unwrap()
-                }
-            );
+            clause_priority_order.sort_unstable_by(|l, r| {
+                let lhs = (3 - self.clause_infos[*l].plbd.min(3), self.clause_infos[*l].activity);
+                let rhs = (3 - self.clause_infos[*r].plbd.min(3), self.clause_infos[*r].activity);
+                lhs.partial_cmp(&rhs).unwrap()
+            });
             // とりあえず半分ぐらいを削除
             for clause_index in clause_priority_order.iter().take(clause_priority_order.len() / 2) {
                 self.clause_infos[*clause_index].is_deleted = true;
@@ -270,7 +280,7 @@ impl ClauseTheory {
                 for value in [0, 1] {
                     let list = &mut self.watched_infos[variable_index][value];
                     let mut k: usize = 0;
-                    while k <  list.len() {
+                    while k < list.len() {
                         if self.clause_infos[list[k].clause_index].is_deleted {
                             list.swap_remove(k);
                         } else {
@@ -292,8 +302,7 @@ impl ClauseTheory {
         }
     }
 
-    pub fn summary(&self) -> (usize, usize) {
-        (self.check_count, self.propagation_count)        
+    pub fn summary(&self) -> (usize, usize, usize) {
+        (self.check_count, self.skip_count, self.propagation_count)
     }
-
 }
