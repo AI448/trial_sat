@@ -88,26 +88,24 @@ impl SATSolver {
 
     #[inline(never)]
     pub fn solve(&mut self) -> SATSolverResult {
-        loop {
-            let search_result = self.search();
-            match search_result {
-                SearchResult::Satisfiable => {
-                    let mut solution = Vec::default();
-                    for variable_index in 0..self.variable_manager.number_of_variables() {
-                        if let VariableState::Assigned { value, .. } = self.variable_manager.get_state(variable_index) {
-                            solution.push(value);
-                        } else {
-                            unreachable!();
-                        }
+        let search_result = self.search();
+        match search_result {
+            SearchResult::Satisfiable => {
+                let mut solution = Vec::default();
+                for variable_index in 0..self.variable_manager.number_of_variables() {
+                    if let VariableState::Assigned { value, .. } = self.variable_manager.get_state(variable_index) {
+                        solution.push(value);
+                    } else {
+                        unreachable!();
                     }
-                    return SATSolverResult::Satisfiable { solution: solution };
                 }
-                SearchResult::Unsatisfiable => {
-                    return SATSolverResult::Unsatisfiable;
-                }
-                SearchResult::Undefined => {
-                    unreachable!();
-                }
+                return SATSolverResult::Satisfiable { solution: solution };
+            }
+            SearchResult::Unsatisfiable => {
+                return SATSolverResult::Unsatisfiable;
+            }
+            SearchResult::Undefined => {
+                unreachable!();
             }
         }
     }
@@ -149,7 +147,7 @@ impl SATSolver {
                 if self.variable_manager.current_decision_level() != 0 {
                     self.backjump(0);
                 }
-                eprintln!("restart_count={} conflict_count={}", self.restart_count, self.conflict_count);
+                eprintln!("restart_count={} conflict_count={} fixed={}", self.restart_count, self.conflict_count, self.variable_manager.number_of_assigned_variables());
                 self.restart_count += 1;
                 self.clause_theory.restart(&self.variable_manager);
             } else {
@@ -160,10 +158,10 @@ impl SATSolver {
     }
 
     #[inline(never)]
-    pub fn summary(&self) -> (usize, usize, usize, usize, usize) {
+    pub fn summary(&self) -> (usize, usize, usize, usize, usize, usize) {
         // TODO: 各種サマリを返せるようにしたい & 計算途中にコールバック関数でも返せるようにしたい
         let s = self.clause_theory.summary();
-        (s.0, s.1, s.2, self.conflict_count, self.restart_count)
+        (s.0, s.1, s.2, s.3, self.conflict_count, self.restart_count)
     }
 
     #[inline(never)]

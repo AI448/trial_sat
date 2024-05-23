@@ -11,6 +11,7 @@ use super::variable_manager::VariableState;
 struct WatchedBy {
     clause_index: usize,
     watching_position: usize,
+    cached_another_literal: Option<Literal>,
 }
 
 struct Clause {
@@ -33,7 +34,8 @@ pub struct ClauseTheory {
     current_plbd_ammount: u64,
     current_plbd_deque: VecDeque<u64>,
     check_count: usize,
-    skip_count: usize,
+    skip_by_cached_count: usize,
+    skip_by_another_count: usize,
     propagation_count: usize,
     clause_reduction_count: usize,
 }
@@ -51,7 +53,8 @@ impl ClauseTheory {
             current_plbd_ammount: 0,
             current_plbd_deque: VecDeque::default(),
             check_count: 0,
-            skip_count: 0,
+            skip_by_cached_count: 0,
+            skip_by_another_count: 0,
             propagation_count: 0,
             clause_reduction_count: 0,
         }
@@ -104,7 +107,7 @@ impl ClauseTheory {
             // 先頭の 2 つを監視リテラルに
             for (k, literal) in literals.iter().enumerate().take(2) {
                 self.watched_infos[literal.index][1 - (literal.sign as usize)]
-                    .push(WatchedBy { clause_index: clause_index, watching_position: k });
+                    .push(WatchedBy { clause_index: clause_index, watching_position: k, cached_another_literal: Some(literals[1 - k])});
             }
 
             if variable_manager.is_false(literals[1]) {
@@ -158,57 +161,62 @@ impl ClauseTheory {
         else {
             unreachable!();
         };
-        // NOTE: 移動するなら以降の処理を ClauseManager に
         let mut k = 0usize;
         // variable_index への value の割当を監視している節を走査
-        // MEMO: self.watched_infos[variable_index][value as usize].len() が長くならない(領域の再確保が行われない)仮定を使えばもう少し速くできるんだろうか？
         'loop_watching_clause: while k < self.watched_infos[assigned_variable_index][assigned_value as usize].len() {
             self.check_count += 1;
-            let WatchedBy { clause_index, watching_position } =
+            let WatchedBy { clause_index, watching_position ,cached_another_literal} =
                 self.watched_infos[assigned_variable_index][assigned_value as usize][k];
             // println!("c{}", clause_index);
             debug_assert!(watching_position < 2);
-            let clause = &mut self.clause_infos[clause_index];
-            let watched_literal = clause.literals[watching_position];
-            debug_assert!(watched_literal.index == assigned_variable_index);
-            debug_assert!(watched_literal.sign == !assigned_value);
-            let another_watched_literal = clause.literals[1 - watching_position];
-            debug_assert!(!variable_manager.is_false(another_watched_literal)); // 既に false が割り当てられていることはないはず
-            if variable_manager.is_true(another_watched_literal) {
-                // もう一方の監視リテラルに真が割り当てられており既に充足されているのでなにもしない
-                self.skip_count += 1;
+            if cached_another_literal.is_some_and(|l| variable_manager.is_true(l)) {
+                // cached_another_literal に真が割り当てられており既に充足されているのでなにもしない
+                self.skip_by_cached_count += 1;
             } else {
-                // 監視対象ではないリテラルを走査
-                for (l, literal) in clause.literals.iter().enumerate().skip(2) {
-                    if !variable_manager.is_false(*literal) {
-                        // 真が割り当てられているまたは未割り当てのリテラルを発見した場合
-                        // 元の監視リテラルの監視を解除
-                        self.watched_infos[watched_literal.index][!watched_literal.sign as usize].swap_remove(k);
-                        // 発見したリテラルを監視
-                        self.watched_infos[literal.index][!literal.sign as usize]
-                            .push(WatchedBy { clause_index: clause_index, watching_position });
-                        // 発見したリテラルを監視位置に移動
-                        clause.literals.swap(watching_position, l);
-                        // 次の節へ
-                        continue 'loop_watching_clause;
+                let clause = &mut self.clause_infos[clause_index];
+                let watched_literal = clause.literals[watching_position];
+                debug_assert!(watched_literal.index == assigned_variable_index);
+                debug_assert!(watched_literal.sign == !assigned_value);
+                let another_watched_literal = clause.literals[1 - watching_position];
+                if variable_manager.is_true(another_watched_literal) {
+                    // もう一方の監視リテラルに真が割り当てられており既に充足されている場合
+                    self.skip_by_another_count += 1;
+                    self.watched_infos[assigned_variable_index][assigned_value as usize][k].cached_another_literal = Some(another_watched_literal);
+                } else {
+                    // 監視対象ではないリテラルを走査
+                    for (l, literal) in clause.literals.iter().enumerate().skip(2) {
+                        if !variable_manager.is_false(*literal) {
+                            // 真が割り当てられているまたは未割り当てのリテラルを発見した場合
+                            // 元の監視リテラルの監視を解除
+                            self.watched_infos[watched_literal.index][!watched_literal.sign as usize].swap_remove(k);
+                            // 発見したリテラルを監視
+                            self.watched_infos[literal.index][!literal.sign as usize]
+                                .push(WatchedBy { clause_index: clause_index, watching_position, cached_another_literal: None });
+                            // 発見したリテラルを監視位置に移動
+                            clause.literals.swap(watching_position, l);
+                            // 次の節へ
+                            continue 'loop_watching_clause;
+                        }
                     }
-                }
-                // 真が割り当てられているまたは未割り当てのリテラルが見つからなかった場合には，もう一方の監視リテラルに真を割り当て
-                self.propagation_count += 1;
-                tentative_assigned_variable_queue.insert(
-                    another_watched_literal.index,
-                    another_watched_literal.sign,
-                    Reason::Propagation {
-                        clause_index: clause_index,
-                        assignment_level_at_propagated: variable_manager.current_assignment_level(),
-                    },
-                );
-                if clause.is_learnt {
-                    // pseudo_lbd を更新
-                    let pseudo_lbd = self.calculate_plbd.calculate(variable_manager, &clause.literals);
-                    if pseudo_lbd < clause.plbd {
-                        self.plbd_ammount -= clause.plbd - pseudo_lbd;
-                        clause.plbd = pseudo_lbd;
+                    // 真が割り当てられているまたは未割り当てのリテラルが見つからなかった場合
+                    debug_assert!(!variable_manager.is_false(another_watched_literal)); // もう一方の監視リテラルに false が割り当てられていることはないはず
+                    // もう一方の監視リテラルに真を割り当て
+                    self.propagation_count += 1;
+                    tentative_assigned_variable_queue.insert(
+                        another_watched_literal.index,
+                        another_watched_literal.sign,
+                        Reason::Propagation {
+                            clause_index: clause_index,
+                            assignment_level_at_propagated: variable_manager.current_assignment_level(),
+                        },
+                    );
+                    if clause.is_learnt {
+                        // pseudo_lbd を更新
+                        let pseudo_lbd = self.calculate_plbd.calculate(variable_manager, &clause.literals);
+                        if pseudo_lbd < clause.plbd {
+                            self.plbd_ammount -= clause.plbd - pseudo_lbd;
+                            clause.plbd = pseudo_lbd;
+                        }
                     }
                 }
             }
@@ -302,7 +310,7 @@ impl ClauseTheory {
         }
     }
 
-    pub fn summary(&self) -> (usize, usize, usize) {
-        (self.check_count, self.skip_count, self.propagation_count)
+    pub fn summary(&self) -> (usize, usize, usize, usize) {
+        (self.check_count, self.skip_by_cached_count, self.skip_by_another_count, self.propagation_count)
     }
 }
