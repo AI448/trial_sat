@@ -1,5 +1,6 @@
 use super::super::finite_collections::Comparator;
 use super::super::finite_collections::FiniteHeapedMap;
+use super::types::Index;
 use super::variable_manager::Reason;
 use std::cmp::Ordering;
 
@@ -8,8 +9,8 @@ use std::cmp::Ordering;
 #[derive(Default)]
 pub struct TentativeAssignedVariableQueue {
     // TODO: conflicting_variable_queue の要素は順序付けできないのでただの map でいい
-    conflicting_variables: FiniteHeapedMap<[Reason; 2], ConflictingVariableComparator>,
-    consistent_variables: FiniteHeapedMap<(bool, Reason), ConsistentVariableComparator>,
+    conflicting_variables: FiniteHeapedMap<Index, [Reason; 2], ConflictingVariableComparator>,
+    consistent_variables: FiniteHeapedMap<Index, (bool, Reason), ConsistentVariableComparator>,
 }
 
 impl TentativeAssignedVariableQueue {
@@ -36,12 +37,12 @@ impl TentativeAssignedVariableQueue {
     }
 
     #[inline(always)]
-    pub fn iter_conflicting_variables(&self) -> impl Iterator<Item = &(usize, [Reason; 2])> {
+    pub fn iter_conflicting_variables(&self) -> impl Iterator<Item = &(Index, [Reason; 2])> {
         self.conflicting_variables.iter()
     }
 
     #[inline(never)]
-    pub fn pop_first_consistent_variable(&mut self) -> Option<(usize, bool, Reason)> {
+    pub fn pop_first_consistent_variable(&mut self) -> Option<(Index, bool, Reason)> {
         match self.consistent_variables.pop_first() {
             Some((variable_index, (value, reason))) => Some((variable_index, value, reason)),
             None => None,
@@ -49,7 +50,7 @@ impl TentativeAssignedVariableQueue {
     }
 
     #[inline(never)]
-    pub fn insert(&mut self, variable_index: usize, value: bool, reason: Reason) {
+    pub fn insert(&mut self, variable_index: Index, value: bool, reason: Reason) {
         if self.conflicting_variables.contains_key(variable_index) {
             // variable_index が既にに矛盾している場合
             let original_reasons = self.conflicting_variables.get(variable_index).unwrap();
@@ -97,7 +98,7 @@ pub struct TentativeAssignedVariableComparator {
 
 impl TentativeAssignedVariableComparator {
     #[inline(always)]
-    fn reason_to_tuple(reason: &Reason) -> (usize, usize) {
+    fn reason_to_tuple(reason: &Reason) -> (u8, Index) {
         match reason {
             Reason::Decision => (0, 0),
             Reason::Propagation { assignment_level_at_propagated, .. } => (1, *assignment_level_at_propagated),
@@ -115,18 +116,18 @@ impl TentativeAssignedVariableComparator {
 
 struct ConsistentVariableComparator {}
 
-impl Comparator<(bool, Reason)> for ConsistentVariableComparator {
+impl Comparator<Index, (bool, Reason)> for ConsistentVariableComparator {
     #[inline(always)]
-    fn compare(lhs: &(usize, (bool, Reason)), rhs: &(usize, (bool, Reason))) -> Ordering {
+    fn compare(lhs: &(Index, (bool, Reason)), rhs: &(Index, (bool, Reason))) -> Ordering {
         TentativeAssignedVariableComparator::compare(&lhs.1 .1, &rhs.1 .1)
     }
 }
 
 struct ConflictingVariableComparator {}
 
-impl Comparator<[Reason; 2]> for ConflictingVariableComparator {
+impl Comparator<Index, [Reason; 2]> for ConflictingVariableComparator {
     #[inline(always)]
-    fn compare(_: &(usize, [Reason; 2]), _: &(usize, [Reason; 2])) -> Ordering {
+    fn compare(_: &(Index, [Reason; 2]), _: &(Index, [Reason; 2])) -> Ordering {
         Ordering::Equal
     }
 }

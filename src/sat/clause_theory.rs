@@ -2,15 +2,15 @@ use std::collections::VecDeque;
 
 use super::calculate_pseudo_lbd::CalculatePseudoLBD;
 use super::tentative_assigned_variable_queue::TentativeAssignedVariableQueue;
-use super::types::Literal;
+use super::types::{Index, Literal};
 use super::variable_manager::Reason;
 use super::variable_manager::VariableManager;
 use super::variable_manager::VariableState;
 
 #[derive(Clone, Copy)]
 struct WatchedBy {
-    clause_index: usize,
-    watching_position: usize,
+    clause_index: Index,
+    watching_position: Index,
     cached_another_literal: Option<Literal>,
 }
 
@@ -29,7 +29,7 @@ pub struct ClauseTheory {
     watched_infos: Vec<[Vec<WatchedBy>; 2]>, // NOTE: Literal を添え字にしてアクセスできる配列を使いたい
     clause_infos: Vec<Clause>,
     calculate_plbd: CalculatePseudoLBD,
-    number_of_learnt_clauses: usize,
+    number_of_learnt_clauses: Index,
     plbd_ammount: u64,
     current_plbd_ammount: u64,
     current_plbd_deque: VecDeque<u64>,
@@ -73,7 +73,7 @@ impl ClauseTheory {
     ) {
         // TODO: あとで対応(すべてのリテラルに偽が割り当てられているケースはひとまず考えない)
         assert!(!literals.iter().all(|literal| variable_manager.is_false(*literal)));
-        let clause_index = self.clause_infos.len();
+        let clause_index = self.clause_infos.len() as Index;
         if literals.len() == 0 {
             assert!(false); // TODO: あとで対応(上の all での判定で除かれるはず)
         } else if literals.len() == 1 {
@@ -106,8 +106,11 @@ impl ClauseTheory {
             assert!(variable_manager.is_true(literals[0]) || !variable_manager.is_assigned(literals[0]));
             // 先頭の 2 つを監視リテラルに
             for (k, literal) in literals.iter().enumerate().take(2) {
-                self.watched_infos[literal.index][1 - (literal.sign as usize)]
-                    .push(WatchedBy { clause_index: clause_index, watching_position: k, cached_another_literal: Some(literals[1 - k])});
+                self.watched_infos[literal.index as usize][1 - (literal.sign as usize)].push(WatchedBy {
+                    clause_index: clause_index,
+                    watching_position: k as Index,
+                    cached_another_literal: Some(literals[1 - k]),
+                });
             }
 
             if variable_manager.is_false(literals[1]) {
@@ -154,7 +157,7 @@ impl ClauseTheory {
     pub fn inform_assignment(
         &mut self,
         variable_manager: &VariableManager,
-        assigned_variable_index: usize,
+        assigned_variable_index: Index,
         tentative_assigned_variable_queue: &mut TentativeAssignedVariableQueue,
     ) {
         let VariableState::Assigned { value: assigned_value, .. } = variable_manager.get_state(assigned_variable_index)
@@ -163,44 +166,51 @@ impl ClauseTheory {
         };
         let mut k = 0usize;
         // variable_index への value の割当を監視している節を走査
-        'loop_watching_clause: while k < self.watched_infos[assigned_variable_index][assigned_value as usize].len() {
+        'loop_watching_clause: while k < self.watched_infos[assigned_variable_index as usize][assigned_value as usize]
+            .len()
+        {
             self.check_count += 1;
-            let WatchedBy { clause_index, watching_position ,cached_another_literal} =
-                self.watched_infos[assigned_variable_index][assigned_value as usize][k];
+            let WatchedBy { clause_index, watching_position, cached_another_literal } =
+                self.watched_infos[assigned_variable_index as usize][assigned_value as usize][k];
             // println!("c{}", clause_index);
             debug_assert!(watching_position < 2);
             if cached_another_literal.is_some_and(|l| variable_manager.is_true(l)) {
                 // cached_another_literal に真が割り当てられており既に充足されているのでなにもしない
                 self.skip_by_cached_count += 1;
             } else {
-                let clause = &mut self.clause_infos[clause_index];
-                let watched_literal = clause.literals[watching_position];
+                let clause = &mut self.clause_infos[clause_index as usize];
+                let watched_literal = clause.literals[watching_position as usize];
                 debug_assert!(watched_literal.index == assigned_variable_index);
                 debug_assert!(watched_literal.sign == !assigned_value);
-                let another_watched_literal = clause.literals[1 - watching_position];
+                let another_watched_literal = clause.literals[1 - watching_position as usize];
                 if variable_manager.is_true(another_watched_literal) {
                     // もう一方の監視リテラルに真が割り当てられており既に充足されている場合
                     self.skip_by_another_count += 1;
-                    self.watched_infos[assigned_variable_index][assigned_value as usize][k].cached_another_literal = Some(another_watched_literal);
+                    self.watched_infos[assigned_variable_index as usize][assigned_value as usize][k]
+                        .cached_another_literal = Some(another_watched_literal);
                 } else {
                     // 監視対象ではないリテラルを走査
                     for (l, literal) in clause.literals.iter().enumerate().skip(2) {
                         if !variable_manager.is_false(*literal) {
                             // 真が割り当てられているまたは未割り当てのリテラルを発見した場合
                             // 元の監視リテラルの監視を解除
-                            self.watched_infos[watched_literal.index][!watched_literal.sign as usize].swap_remove(k);
+                            self.watched_infos[watched_literal.index as usize][!watched_literal.sign as usize]
+                                .swap_remove(k);
                             // 発見したリテラルを監視
-                            self.watched_infos[literal.index][!literal.sign as usize]
-                                .push(WatchedBy { clause_index: clause_index, watching_position, cached_another_literal: None });
+                            self.watched_infos[literal.index as usize][!literal.sign as usize].push(WatchedBy {
+                                clause_index: clause_index,
+                                watching_position,
+                                cached_another_literal: None,
+                            });
                             // 発見したリテラルを監視位置に移動
-                            clause.literals.swap(watching_position, l);
+                            clause.literals.swap(watching_position as usize, l);
                             // 次の節へ
                             continue 'loop_watching_clause;
                         }
                     }
                     // 真が割り当てられているまたは未割り当てのリテラルが見つからなかった場合
                     debug_assert!(!variable_manager.is_false(another_watched_literal)); // もう一方の監視リテラルに false が割り当てられていることはないはず
-                    // もう一方の監視リテラルに真を割り当て
+                                                                                        // もう一方の監視リテラルに真を割り当て
                     self.propagation_count += 1;
                     tentative_assigned_variable_queue.insert(
                         another_watched_literal.index,
@@ -224,14 +234,17 @@ impl ClauseTheory {
         }
     }
 
-    pub fn explain(&mut self, variable_index: usize, value: bool, reason: Reason, clause: &mut Vec<Literal>) {
+    pub fn explain(&mut self, variable_index: Index, value: bool, reason: Reason, clause: &mut Vec<Literal>) {
         assert!(matches!(reason, Reason::Propagation { .. }));
         let Reason::Propagation { clause_index, .. } = reason else {
             unreachable!();
         };
-        assert!(self.clause_infos[clause_index].literals.iter().any(|l| l.index == variable_index && l.sign == value));
-        self.clause_infos[clause_index].activity += self.activity_increase_value;
-        clause.clone_from(&self.clause_infos[clause_index].literals);
+        assert!(self.clause_infos[clause_index as usize]
+            .literals
+            .iter()
+            .any(|l| l.index == variable_index && l.sign == value));
+        self.clause_infos[clause_index as usize].activity += self.activity_increase_value;
+        clause.clone_from(&self.clause_infos[clause_index as usize].literals);
     }
 
     pub fn advance_time(&mut self) {
@@ -252,7 +265,7 @@ impl ClauseTheory {
         } else {
             let pseudo_lbd_average = self.plbd_ammount as f64 / self.number_of_learnt_clauses as f64;
             let current_pseudo_lbd_average = self.current_plbd_ammount as f64 / 50.0;
-            self.number_of_learnt_clauses > 10000 + 1000 * (self.clause_reduction_count + 1)
+            self.number_of_learnt_clauses as usize > 10000 + 1000 * (self.clause_reduction_count + 1)
                 || current_pseudo_lbd_average * 0.9 > pseudo_lbd_average
         }
     }
@@ -266,13 +279,13 @@ impl ClauseTheory {
         );
         self.current_plbd_ammount = 0;
         self.current_plbd_deque.clear();
-        if self.number_of_learnt_clauses > 10000 + 1000 * self.clause_reduction_count {
+        if self.number_of_learnt_clauses as usize > 10000 + 1000 * self.clause_reduction_count {
             self.clause_reduction_count += 1;
             let mut clause_priority_order = Vec::from_iter(
                 (0..self.clause_infos.len())
                     .filter(|i| self.clause_infos[*i].is_learnt && !self.clause_infos[*i].is_deleted),
             );
-            debug_assert!(clause_priority_order.len() == self.number_of_learnt_clauses);
+            debug_assert!(clause_priority_order.len() == self.number_of_learnt_clauses as usize);
             // 削除の優先度の高い順にソート
             clause_priority_order.sort_unstable_by(|l, r| {
                 let lhs = (3 - self.clause_infos[*l].plbd.min(3), self.clause_infos[*l].activity);
@@ -286,10 +299,10 @@ impl ClauseTheory {
             // 削除された節の監視を削除
             for variable_index in 0..variable_manager.number_of_variables() {
                 for value in [0, 1] {
-                    let list = &mut self.watched_infos[variable_index][value];
+                    let list = &mut self.watched_infos[variable_index as usize][value];
                     let mut k: usize = 0;
                     while k < list.len() {
-                        if self.clause_infos[list[k].clause_index].is_deleted {
+                        if self.clause_infos[list[k].clause_index as usize].is_deleted {
                             list.swap_remove(k);
                         } else {
                             k += 1;

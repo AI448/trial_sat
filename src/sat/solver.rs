@@ -2,7 +2,7 @@ use crate::finite_collections;
 
 use super::clause_theory::ClauseTheory;
 use super::tentative_assigned_variable_queue::TentativeAssignedVariableQueue;
-use super::types::Literal;
+use super::types::{Index, Literal};
 use super::unassigned_variable_queue::UnassignedVariableQueue;
 use super::variable_manager::Reason;
 use super::variable_manager::VariableManager;
@@ -16,7 +16,7 @@ enum SearchResult {
 
 enum PropagationResult {
     Consistent,
-    Conflict { variable_index: usize, reasons: [Reason; 2] },
+    Conflict { variable_index: Index, reasons: [Reason; 2] },
 }
 
 pub enum SATSolverResult {
@@ -31,7 +31,7 @@ pub struct SATSolver {
     clause_theory: ClauseTheory,
     // TODO これが必要になるなら analyze も別の構造体とした方がよいか
     literal_buffer: Vec<Literal>,
-    analyzer_buffer: finite_collections::FiniteHeapedMap<AnalyzerBufferValue, AnalyzerBufferComparator>,
+    analyzer_buffer: finite_collections::FiniteHeapedMap<Index, AnalyzerBufferValue, AnalyzerBufferComparator>,
     conflict_count: usize,
     restart_count: usize,
 }
@@ -65,8 +65,10 @@ impl SATSolver {
             self.unassigned_variable_queue.insert(variable_index);
         }
         self.clause_theory.expand(additional);
-        assert!(self.tentative_assigned_variable_queue.capacity() == self.variable_manager.number_of_variables());
-        assert!(self.unassigned_variable_queue.capacity() == self.variable_manager.number_of_variables());
+        assert!(
+            self.tentative_assigned_variable_queue.capacity() == self.variable_manager.number_of_variables() as usize
+        );
+        assert!(self.unassigned_variable_queue.capacity() == self.variable_manager.number_of_variables() as usize);
     }
 
     #[inline(never)]
@@ -75,7 +77,7 @@ impl SATSolver {
         // 必要に応じて変数の次元を拡張
         let required_variable_dimension = literals.iter().map(|l| l.index + 1).max().unwrap_or(0);
         if required_variable_dimension > self.variable_manager.number_of_variables() {
-            self.expand_variables(required_variable_dimension - self.variable_manager.number_of_variables());
+            self.expand_variables((required_variable_dimension - self.variable_manager.number_of_variables()) as usize);
         }
 
         self.clause_theory.add_clause(
@@ -147,7 +149,12 @@ impl SATSolver {
                 if self.variable_manager.current_decision_level() != 0 {
                     self.backjump(0);
                 }
-                eprintln!("restart_count={} conflict_count={} fixed={}", self.restart_count, self.conflict_count, self.variable_manager.number_of_assigned_variables());
+                eprintln!(
+                    "restart_count={} conflict_count={} fixed={}",
+                    self.restart_count,
+                    self.conflict_count,
+                    self.variable_manager.number_of_assigned_variables()
+                );
                 self.restart_count += 1;
                 self.clause_theory.restart(&self.variable_manager);
             } else {
@@ -193,7 +200,7 @@ impl SATSolver {
     }
 
     #[inline(never)]
-    fn backjump(&mut self, backjump_decision_level: usize) {
+    fn backjump(&mut self, backjump_decision_level: Index) {
         // println!("@backjump");
         // println!("{} to {}", self.variable_manager.current_decision_level(), backjump_decision_level);
         assert!(backjump_decision_level < self.variable_manager.current_decision_level());
@@ -233,7 +240,7 @@ impl SATSolver {
     }
 
     #[inline(never)]
-    fn resolve(&mut self, variable_index: usize, value: bool, reason: Reason) {
+    fn resolve(&mut self, variable_index: Index, value: bool, reason: Reason) {
         // MEMO: このあたりはもう少しマシな設計がある気がする
         // 割り当てを説明する節を取得
         self.literal_buffer.clear();
@@ -270,11 +277,12 @@ impl SATSolver {
     }
 
     #[inline(never)]
-    fn analyze(&mut self, conflicting_variable_index: usize, reasons: [Reason; 2]) -> (usize, Vec<Literal>) {
+    fn analyze(&mut self, conflicting_variable_index: Index, reasons: [Reason; 2]) -> (Index, Vec<Literal>) {
         // println!("@analyze");
         self.analyzer_buffer.clear();
-        if self.analyzer_buffer.len() < self.variable_manager.number_of_variables() {
-            self.analyzer_buffer.reserve(self.variable_manager.number_of_variables() - self.analyzer_buffer.len());
+        if self.analyzer_buffer.len() < self.variable_manager.number_of_variables() as usize {
+            self.analyzer_buffer
+                .reserve(self.variable_manager.number_of_variables() as usize - self.analyzer_buffer.len());
         }
         // 矛盾が生じている変数のアクティビティを増大
         self.unassigned_variable_queue.increase_activity(conflicting_variable_index);
@@ -326,16 +334,16 @@ impl SATSolver {
 
 struct AnalyzerBufferValue {
     sign: bool,
-    decision_level: usize,
-    assignment_level: usize,
+    decision_level: Index,
+    assignment_level: Index,
     reason: Reason,
 }
 
 struct AnalyzerBufferComparator {}
 
-impl finite_collections::Comparator<AnalyzerBufferValue> for AnalyzerBufferComparator {
+impl finite_collections::Comparator<Index, AnalyzerBufferValue> for AnalyzerBufferComparator {
     #[inline(always)]
-    fn compare(lhs: &(usize, AnalyzerBufferValue), rhs: &(usize, AnalyzerBufferValue)) -> std::cmp::Ordering {
+    fn compare(lhs: &(Index, AnalyzerBufferValue), rhs: &(Index, AnalyzerBufferValue)) -> std::cmp::Ordering {
         rhs.1.assignment_level.cmp(&lhs.1.assignment_level)
     }
 }

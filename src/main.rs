@@ -38,7 +38,7 @@ fn main() {
             for clause in problem.clauses.iter() {
                 let mut is_satisfied = false;
                 for literal in clause.iter() {
-                    if solution[literal.index] == literal.sign {
+                    if solution[literal.index as usize] == literal.sign {
                         is_satisfied = true;
                         break;
                     }

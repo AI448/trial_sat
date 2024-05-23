@@ -1,39 +1,45 @@
+use num::{PrimInt, Unsigned};
 use std::{cmp::Ordering, marker::PhantomData};
 
-pub trait Comparator<V> {
-    fn compare(lhs: &(usize, V), rhs: &(usize, V)) -> Ordering;
+pub trait Comparator<IndexT, ValueT> {
+    fn compare(lhs: &(IndexT, ValueT), rhs: &(IndexT, ValueT)) -> Ordering;
 }
 
-pub trait Sort<V>: Default {
-    fn update(&self, heap_array: &mut Vec<(usize, V)>, position_array: &mut Vec<usize>, position: usize);
-    fn up_heap(&self, heap_array: &mut Vec<(usize, V)>, position_array: &mut Vec<usize>, position: usize);
-    fn down_heap(&self, heap_array: &mut Vec<(usize, V)>, position_array: &mut Vec<usize>, position: usize);
+pub trait Sort<IndexT, ValueT>: Default {
+    fn update(&self, heap_array: &mut Vec<(IndexT, ValueT)>, position_array: &mut Vec<IndexT>, position: IndexT);
+    fn up_heap(&self, heap_array: &mut Vec<(IndexT, ValueT)>, position_array: &mut Vec<IndexT>, position: IndexT);
+    fn down_heap(&self, heap_array: &mut Vec<(IndexT, ValueT)>, position_array: &mut Vec<IndexT>, position: IndexT);
 }
 
-pub struct Base<V, S>
+pub struct Base<IndexT, ValueT, SortT>
 where
-    S: Sort<V>,
+    IndexT: Unsigned + PrimInt,
+    SortT: Sort<IndexT, ValueT>,
 {
-    heap_array: Vec<(usize, V)>,
-    position_array: Vec<usize>,
-    sort: S,
+    heap_array: Vec<(IndexT, ValueT)>,
+    position_array: Vec<IndexT>,
+    sort: SortT,
 }
 
-impl<V, S> Default for Base<V, S>
+impl<IndexT, ValueT, SortT> Default for Base<IndexT, ValueT, SortT>
 where
-    S: Sort<V>,
+    IndexT: Unsigned + PrimInt,
+    SortT: Sort<IndexT, ValueT>,
 {
-    #[inline(never)]
     fn default() -> Self {
-        Base { heap_array: Vec::default(), position_array: Vec::default(), sort: S::default() }
+        Base { heap_array: Vec::default(), position_array: Vec::default(), sort: SortT::default() }
     }
 }
 
-impl<V, S> Base<V, S>
+impl<IndexT, ValueT, SortT> Base<IndexT, ValueT, SortT>
 where
-    S: Sort<V>,
+    IndexT: Unsigned + PrimInt,
+    SortT: Sort<IndexT, ValueT>,
 {
-    const NULL_POSITION: usize = usize::MAX;
+    #[inline(always)]
+    fn null_position() -> IndexT {
+        IndexT::max_value()
+    }
 
     #[inline(always)]
     pub fn capacity(&self) -> usize {
@@ -51,55 +57,55 @@ where
     }
 
     #[inline(always)]
-    pub fn first_key_value(&self) -> Option<&(usize, V)> {
+    pub fn first_key_value(&self) -> Option<&(IndexT, ValueT)> {
         self.heap_array.first()
     }
 
     #[inline(always)]
-    pub fn contains_key(&self, index: usize) -> bool {
-        self.position_array[index] != Self::NULL_POSITION
+    pub fn contains_key(&self, index: IndexT) -> bool {
+        self.position_array[index.to_usize().unwrap()] != Self::null_position()
     }
 
     #[inline(always)]
-    pub fn get(&self, index: usize) -> Option<&V> {
-        let p = self.position_array[index];
-        if p != Self::NULL_POSITION {
-            Some(&self.heap_array[p].1)
+    pub fn get(&self, index: IndexT) -> Option<&ValueT> {
+        let p = self.position_array[index.to_usize().unwrap()];
+        if p != Self::null_position() {
+            Some(&self.heap_array[p.to_usize().unwrap()].1)
         } else {
             None
         }
     }
 
     #[inline(always)]
-    pub fn iter(&self) -> impl Iterator<Item = &(usize, V)> {
+    pub fn iter(&self) -> impl Iterator<Item = &(IndexT, ValueT)> {
         self.heap_array.iter()
     }
 
     #[inline(never)]
     pub fn reserve(&mut self, additional: usize) {
         self.heap_array.reserve(additional);
-        self.position_array.extend(std::iter::repeat(Self::NULL_POSITION).take(additional));
+        self.position_array.extend(std::iter::repeat(Self::null_position()).take(additional));
     }
 
     #[inline(never)]
     pub fn clear(&mut self) {
         for (p, (i, _)) in self.heap_array.iter().enumerate() {
-            assert!(self.position_array[*i] == p);
-            self.position_array[*i] = Self::NULL_POSITION;
+            assert!(self.position_array[i.to_usize().unwrap()].to_usize().unwrap() == p);
+            self.position_array[i.to_usize().unwrap()] = Self::null_position();
         }
         self.heap_array.clear();
     }
 
     #[inline(always)]
-    pub fn insert(&mut self, index: usize, value: V) {
-        let p = self.position_array[index];
-        if self.position_array[index] == Self::NULL_POSITION {
-            let p = self.heap_array.len();
-            self.position_array[index] = p;
+    pub fn insert(&mut self, index: IndexT, value: ValueT) {
+        let p = self.position_array[index.to_usize().unwrap()];
+        if p == Self::null_position() {
+            let p = IndexT::from(self.heap_array.len()).unwrap();
+            self.position_array[index.to_usize().unwrap()] = p;
             self.heap_array.push((index, value));
             self.sort.up_heap(&mut self.heap_array, &mut self.position_array, p);
         } else {
-            let (i, v) = &mut self.heap_array[p];
+            let (i, v) = &mut self.heap_array[p.to_usize().unwrap()];
             assert!(*i == index);
             *v = value;
             self.sort.update(&mut self.heap_array, &mut self.position_array, p);
@@ -107,33 +113,33 @@ where
     }
 
     #[inline(always)]
-    pub fn pop_first(&mut self) -> Option<(usize, V)> {
+    pub fn pop_first(&mut self) -> Option<(IndexT, ValueT)> {
         if self.heap_array.len() == 0 {
             None
         } else {
-            let (i, v) = self.heap_array.swap_remove(0);
-            assert!(self.position_array[i] == 0);
-            self.position_array[i] = Self::NULL_POSITION;
+            let (i, v) = self.heap_array.swap_remove(0usize);
+            assert!(self.position_array[i.to_usize().unwrap()] == IndexT::zero());
+            self.position_array[i.to_usize().unwrap()] = Self::null_position();
             if self.heap_array.len() != 0 {
-                self.position_array[self.heap_array[0].0] = 0;
-                self.sort.down_heap(&mut self.heap_array, &mut self.position_array, 0);
+                self.position_array[self.heap_array[0].0.to_usize().unwrap()] = IndexT::zero();
+                self.sort.down_heap(&mut self.heap_array, &mut self.position_array, IndexT::zero());
             }
             Some((i, v))
         }
     }
 
     #[inline(always)]
-    pub fn remove(&mut self, index: usize) -> Option<V> {
-        if self.position_array[index] == Self::NULL_POSITION {
+    pub fn remove(&mut self, index: IndexT) -> Option<ValueT> {
+        if self.position_array[index.to_usize().unwrap()] == Self::null_position() {
             None
         } else {
             assert!(self.heap_array.len() != 0);
-            let position = self.position_array[index];
-            let (i, value) = self.heap_array.swap_remove(position);
+            let position = self.position_array[index.to_usize().unwrap()];
+            let (i, value) = self.heap_array.swap_remove(position.to_usize().unwrap());
             assert!(i == index);
-            self.position_array[index] = Self::NULL_POSITION;
-            if position < self.heap_array.len() {
-                self.position_array[self.heap_array[position].0] = position;
+            self.position_array[index.to_usize().unwrap()] = Self::null_position();
+            if position.to_usize().unwrap() < self.heap_array.len() {
+                self.position_array[self.heap_array[position.to_usize().unwrap()].0.to_usize().unwrap()] = position;
                 self.sort.update(&mut self.heap_array, &mut self.position_array, position);
             }
             Some(value)
@@ -141,51 +147,55 @@ where
     }
 }
 
-pub struct NotSort<V> {
-    phantom: PhantomData<V>,
+pub struct NotSort<IndexT, ValueT> {
+    phantom: PhantomData<(IndexT, ValueT)>,
 }
 
-impl<V> Default for NotSort<V> {
+impl<IndexT, ValueT> Default for NotSort<IndexT, ValueT> {
     fn default() -> Self {
-        NotSort { phantom: PhantomData }
+        NotSort { phantom: PhantomData::default() }
     }
 }
 
-impl<V> Sort<V> for NotSort<V> {
+impl<IndexT, ValueT> Sort<IndexT, ValueT> for NotSort<IndexT, ValueT> {
     #[inline(always)]
-    fn update(&self, _: &mut Vec<(usize, V)>, _: &mut Vec<usize>, _: usize) {}
+    fn update(&self, _: &mut Vec<(IndexT, ValueT)>, _: &mut Vec<IndexT>, _: IndexT) {}
 
     #[inline(always)]
-    fn up_heap(&self, _: &mut Vec<(usize, V)>, _: &mut Vec<usize>, _: usize) {}
+    fn up_heap(&self, _: &mut Vec<(IndexT, ValueT)>, _: &mut Vec<IndexT>, _: IndexT) {}
 
     #[inline(always)]
-    fn down_heap(&self, _: &mut Vec<(usize, V)>, _: &mut Vec<usize>, _: usize) {}
+    fn down_heap(&self, _: &mut Vec<(IndexT, ValueT)>, _: &mut Vec<IndexT>, _: IndexT) {}
 }
 
-pub struct CustomSort<V, C>
+pub struct CustomSort<IndexT, ValueT, ComparatorT>
 where
-    C: Comparator<V>,
+    ComparatorT: Comparator<IndexT, ValueT>,
 {
-    phantom_v: PhantomData<V>,
-    phantom_c: PhantomData<C>,
+    phantom: PhantomData<(IndexT, ValueT, ComparatorT)>,
 }
 
-impl<V, C> Default for CustomSort<V, C>
+impl<IndexT, ValueT, ComparatorT> Default for CustomSort<IndexT, ValueT, ComparatorT>
 where
-    C: Comparator<V>,
+    ComparatorT: Comparator<IndexT, ValueT>,
 {
     fn default() -> Self {
-        CustomSort { phantom_v: PhantomData, phantom_c: PhantomData }
+        CustomSort { phantom: PhantomData::default() }
     }
 }
 
-impl<V, C> Sort<V> for CustomSort<V, C>
+impl<IndexT, ValueT, ComparatorT> Sort<IndexT, ValueT> for CustomSort<IndexT, ValueT, ComparatorT>
 where
-    C: Comparator<V>,
+    IndexT: Unsigned + PrimInt,
+    ComparatorT: Comparator<IndexT, ValueT>,
 {
     #[inline(always)]
-    fn update(&self, heap_array: &mut Vec<(usize, V)>, position_array: &mut Vec<usize>, position: usize) {
-        if position != 0 && C::compare(&heap_array[(position + 1) / 2 - 1], &heap_array[position]) == Ordering::Greater
+    fn update(&self, heap_array: &mut Vec<(IndexT, ValueT)>, position_array: &mut Vec<IndexT>, position: IndexT) {
+        if position.to_usize().unwrap() != 0
+            && ComparatorT::compare(
+                &heap_array[(position.to_usize().unwrap() + 1) / 2 - 1],
+                &heap_array[position.to_usize().unwrap()],
+            ) == Ordering::Greater
         {
             self.up_heap(heap_array, position_array, position);
         } else {
@@ -194,16 +204,17 @@ where
     }
 
     #[inline(never)]
-    fn up_heap(&self, heap_array: &mut Vec<(usize, V)>, position_array: &mut Vec<usize>, position: usize) {
-        let mut current = position;
+    fn up_heap(&self, heap_array: &mut Vec<(IndexT, ValueT)>, position_array: &mut Vec<IndexT>, position: IndexT) {
+        let mut current = position.to_usize().unwrap();
         loop {
             if current == 0 {
                 break;
             }
             let parent = (current + 1) / 2 - 1;
-            if C::compare(&heap_array[parent], &heap_array[current]) == Ordering::Greater {
+            if ComparatorT::compare(&heap_array[parent], &heap_array[current]) == Ordering::Greater {
                 heap_array.swap(parent, current);
-                position_array.swap(heap_array[parent].0, heap_array[current].0);
+                position_array
+                    .swap(heap_array[parent].0.to_usize().unwrap(), heap_array[current].0.to_usize().unwrap());
                 current = parent;
             } else {
                 break;
@@ -212,23 +223,25 @@ where
     }
 
     #[inline(never)]
-    fn down_heap(&self, heap_array: &mut Vec<(usize, V)>, position_array: &mut Vec<usize>, position: usize) {
-        let mut current = position;
+    fn down_heap(&self, heap_array: &mut Vec<(IndexT, ValueT)>, position_array: &mut Vec<IndexT>, position: IndexT) {
+        let mut current = position.to_usize().unwrap();
         loop {
             let left = (current + 1) * 2 - 1;
             let right = (current + 1) * 2;
             if left >= heap_array.len() {
                 break;
             }
-            let smaller_child =
-                if right >= heap_array.len() || C::compare(&heap_array[left], &heap_array[right]) == Ordering::Less {
-                    left
-                } else {
-                    right
-                };
-            if C::compare(&heap_array[current], &heap_array[smaller_child]) == Ordering::Greater {
+            let smaller_child = if right >= heap_array.len()
+                || ComparatorT::compare(&heap_array[left], &heap_array[right]) == Ordering::Less
+            {
+                left
+            } else {
+                right
+            };
+            if ComparatorT::compare(&heap_array[current], &heap_array[smaller_child]) == Ordering::Greater {
                 heap_array.swap(current, smaller_child);
-                position_array.swap(heap_array[current].0, heap_array[smaller_child].0);
+                position_array
+                    .swap(heap_array[current].0.to_usize().unwrap(), heap_array[smaller_child].0.to_usize().unwrap());
                 current = smaller_child;
             } else {
                 break;
@@ -237,6 +250,6 @@ where
     }
 }
 
-pub type FiniteHeapedMap<V, C> = Base<V, CustomSort<V, C>>;
+pub type FiniteHeapedMap<IndexT, ValueT, ComparatorT> = Base<IndexT, ValueT, CustomSort<IndexT, ValueT, ComparatorT>>;
 
-pub type FiniteMap<V> = Base<V, NotSort<V>>;
+pub type FiniteMap<IndexT, ValueT> = Base<IndexT, ValueT, NotSort<IndexT, ValueT>>;

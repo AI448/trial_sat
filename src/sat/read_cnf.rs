@@ -1,4 +1,4 @@
-use super::types::Literal;
+use super::types::{Index, Literal};
 
 #[derive(Default)]
 pub struct SATProblem {
@@ -15,7 +15,7 @@ fn parse_line(line: &String) -> Vec<Literal> {
             found_zero = true;
             continue;
         }
-        clause.push(Literal { sign: i > 0, index: (i.abs() - 1) as usize })
+        clause.push(Literal { sign: i > 0, index: (i.abs() - 1) as Index })
     }
     assert!(found_zero);
     clause

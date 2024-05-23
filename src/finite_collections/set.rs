@@ -1,16 +1,18 @@
 use super::base;
+use num::{PrimInt, Unsigned};
 
-pub struct Set {
-    map: base::Base<(), base::NotSort<()>>,
+#[derive(Default)]
+pub struct Set<IndexT>
+where
+    IndexT: Unsigned + PrimInt,
+{
+    map: base::Base<IndexT, (), base::NotSort<IndexT, ()>>,
 }
 
-impl Default for Set {
-    fn default() -> Self {
-        Set { map: base::Base::default() }
-    }
-}
-
-impl Set {
+impl<IndexT> Set<IndexT>
+where
+    IndexT: Unsigned + PrimInt,
+{
     pub fn capacity(&self) -> usize {
         self.map.capacity()
     }
@@ -23,11 +25,11 @@ impl Set {
         self.map.is_empty()
     }
 
-    pub fn contains_key(&self, index: usize) -> bool {
+    pub fn contains_key(&self, index: IndexT) -> bool {
         self.map.contains_key(index)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &usize> {
+    pub fn iter(&self) -> impl Iterator<Item = &IndexT> {
         self.map.iter().map(|(index, ..)| index)
     }
 
@@ -39,11 +41,11 @@ impl Set {
         self.map.clear();
     }
 
-    pub fn insert(&mut self, index: usize) {
+    pub fn insert(&mut self, index: IndexT) {
         self.map.insert(index, ());
     }
 
-    pub fn remove(&mut self, index: usize) {
+    pub fn remove(&mut self, index: IndexT) {
         self.map.remove(index);
     }
 }

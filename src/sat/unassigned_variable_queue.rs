@@ -1,12 +1,13 @@
 use super::super::finite_collections::Comparator;
 use super::super::finite_collections::FiniteHeapedMap;
+use super::types::Index;
 
 /// 未割り当て変数の優先度付きキュー
 pub struct UnassignedVariableQueue {
     time_constant: f64,
     increase_value: f64,
     activities: Vec<f64>,
-    queue: FiniteHeapedMap<f64, UnassignedVariableComparator>,
+    queue: FiniteHeapedMap<Index, f64, UnassignedVariableComparator>,
 }
 
 impl UnassignedVariableQueue {
@@ -34,21 +35,21 @@ impl UnassignedVariableQueue {
         self.queue.reserve(additional);
     }
 
-    pub fn insert(&mut self, variable_index: usize) {
-        self.queue.insert(variable_index, self.activities[variable_index]);
+    pub fn insert(&mut self, variable_index: Index) {
+        self.queue.insert(variable_index, self.activities[variable_index as usize]);
     }
 
-    pub fn pop_first(&mut self) -> Option<usize> {
+    pub fn pop_first(&mut self) -> Option<Index> {
         match self.queue.pop_first() {
             Some((variable_index, ..)) => Some(variable_index),
             None => None,
         }
     }
 
-    pub fn increase_activity(&mut self, variable_index: usize) {
-        self.activities[variable_index] += self.increase_value;
+    pub fn increase_activity(&mut self, variable_index: Index) {
+        self.activities[variable_index as usize] += self.increase_value;
         if self.queue.contains_key(variable_index) {
-            self.queue.insert(variable_index, self.activities[variable_index]);
+            self.queue.insert(variable_index, self.activities[variable_index as usize]);
         }
     }
 
@@ -63,7 +64,7 @@ impl UnassignedVariableQueue {
             let variable_indices = Vec::from_iter(self.queue.iter().map(|x| x.0));
             self.queue.clear();
             for variable_index in variable_indices {
-                self.queue.insert(variable_index, self.activities[variable_index]);
+                self.queue.insert(variable_index, self.activities[variable_index as usize]);
             }
         }
     }
@@ -71,9 +72,9 @@ impl UnassignedVariableQueue {
 
 pub struct UnassignedVariableComparator {}
 
-impl Comparator<f64> for UnassignedVariableComparator {
+impl Comparator<Index, f64> for UnassignedVariableComparator {
     #[inline(always)]
-    fn compare(lhs: &(usize, f64), rhs: &(usize, f64)) -> std::cmp::Ordering {
+    fn compare(lhs: &(Index, f64), rhs: &(Index, f64)) -> std::cmp::Ordering {
         rhs.1.partial_cmp(&lhs.1).unwrap()
     }
 }
