@@ -97,15 +97,16 @@ pub struct TentativeAssignedVariableComparator {
 
 impl TentativeAssignedVariableComparator {
     #[inline(always)]
-    fn reason_to_tuple(reason: &Reason) -> (usize, usize) {
+    pub fn reason_to_tuple(reason: &Reason) -> (u8, u64, usize) {
         match reason {
-            Reason::Decision => (0, 0),
-            Reason::Propagation { assignment_level_at_propagated, .. } => (1, *assignment_level_at_propagated),
+            Reason::Decision => (0, 0, 0),
+            // Reason::Propagation {pldb_upper, assignment_level_at_propagated, .. } => (1, *pldb_upper, *assignment_level_at_propagated),
+            Reason::Propagation {assignment_level_at_propagated, .. } => (1, 0, *assignment_level_at_propagated),            
         }
     }
 
     #[inline(always)]
-    fn compare(lhs: &Reason, rhs: &Reason) -> Ordering {
+    pub fn compare(lhs: &Reason, rhs: &Reason) -> Ordering {
         // TODO: ここのパフォーマンスは要確認．重たければタプルを事前に計算してヒープに持たせておく
         let l = Self::reason_to_tuple(lhs);
         let r = Self::reason_to_tuple(rhs);
@@ -125,8 +126,13 @@ impl Comparator<(bool, Reason)> for ConsistentVariableComparator {
 struct ConflictingVariableComparator {}
 
 impl Comparator<[Reason; 2]> for ConflictingVariableComparator {
+    
     #[inline(always)]
-    fn compare(_: &(usize, [Reason; 2]), _: &(usize, [Reason; 2])) -> Ordering {
-        Ordering::Equal
+    fn compare(lhs: &(usize, [Reason; 2]), rhs: &(usize, [Reason; 2])) -> Ordering {
+        let l0 = TentativeAssignedVariableComparator::reason_to_tuple(&lhs.1[0]);
+        let l1 = TentativeAssignedVariableComparator::reason_to_tuple(&lhs.1[1]);
+        let r0 = TentativeAssignedVariableComparator::reason_to_tuple(&rhs.1[0]);
+        let r1 = TentativeAssignedVariableComparator::reason_to_tuple(&rhs.1[1]);
+        (l0.0 + l1.0, l0.1 + l1.1, l0.2 + l1.2).cmp(&(r0.0 + r1.0, r0.1 + r1.1, r0.2 + r1.2))
     }
 }

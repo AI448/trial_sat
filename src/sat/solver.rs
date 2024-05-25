@@ -1,3 +1,5 @@
+// use std::collections::VecDeque;
+
 use crate::finite_collections;
 
 use super::clause_theory::ClauseTheory;
@@ -32,6 +34,9 @@ pub struct SATSolver {
     // TODO これが必要になるなら analyze も別の構造体とした方がよいか
     literal_buffer: Vec<Literal>,
     analyzer_buffer: finite_collections::FiniteHeapedMap<AnalyzerBufferValue, AnalyzerBufferComparator>,
+    // conflicting_decision_level_amount: usize,
+    // current_conflicting_decision_levels: VecDeque<usize>,
+    // current_conflicting_decision_levels_amount: usize,
     conflict_count: usize,
     restart_count: usize,
 }
@@ -46,6 +51,9 @@ impl SATSolver {
             clause_theory: ClauseTheory::new(1e4),
             literal_buffer: Vec::default(),
             analyzer_buffer: finite_collections::FiniteHeapedMap::default(),
+            // conflicting_decision_level_amount: 0,
+            // current_conflicting_decision_levels: VecDeque::default(),
+            // current_conflicting_decision_levels_amount: 0,
             conflict_count: 0usize,
             restart_count: 0usize,
         }
@@ -82,6 +90,7 @@ impl SATSolver {
             &self.variable_manager,
             literals,
             false,
+            self.conflict_count,
             &mut self.tentative_assigned_variable_queue,
         );
     }
@@ -112,10 +121,19 @@ impl SATSolver {
 
     #[inline(never)]
     fn search(&mut self) -> SearchResult {
+
         loop {
             let propagation_result = self.propagate();
             if let PropagationResult::Conflict { variable_index, reasons } = propagation_result {
                 // 矛盾を検知した場合
+                let current_decision_level = self.variable_manager.current_decision_level();
+                // self.conflicting_decision_level_amount += current_decision_level;
+                // self.current_conflicting_decision_levels.push_back(current_decision_level);
+                // self.current_conflicting_decision_levels_amount += current_decision_level;
+                // if self.current_conflicting_decision_levels.len() > 50 {
+                //     let forgetting_decition_level = self.current_conflicting_decision_levels.pop_front().unwrap();
+                //     self.current_conflicting_decision_levels_amount -= forgetting_decition_level;
+                // }
                 self.conflict_count += 1;
                 // 決定レベル 0 での矛盾であれば充足不可能
                 if self.variable_manager.current_decision_level() == 0 {
@@ -134,6 +152,7 @@ impl SATSolver {
                     &self.variable_manager,
                     learnt_clause,
                     true,
+                    self.conflict_count,
                     &mut self.tentative_assigned_variable_queue,
                 );
                 // 時刻を 1 つ進める(内部でアクティビティの指数平滑化を行っているため)
@@ -142,14 +161,18 @@ impl SATSolver {
             } else if self.variable_manager.number_of_unassigned_variables() == 0 {
                 // 未割り当ての変数がなくなれば充足可能
                 return SearchResult::Satisfiable;
-            } else if self.clause_theory.is_request_restart() {
+            } else if self.clause_theory.is_request_restart(self.conflict_count){
                 // 矛盾回数が閾値に達したらリスタート
                 if self.variable_manager.current_decision_level() != 0 {
                     self.backjump(0);
                 }
                 eprintln!("restart_count={} conflict_count={} fixed={}", self.restart_count, self.conflict_count, self.variable_manager.number_of_assigned_variables());
+                // eprintln!("cdl_average={} current_cdl_average={}", self.conflicting_decision_level_amount as f64 / self.conflict_count as f64, self.current_conflicting_decision_levels_amount as f64 / 50.0);
                 self.restart_count += 1;
-                self.clause_theory.restart(&self.variable_manager);
+                // self.current_conflicting_decision_levels.clear();
+                // self.current_conflicting_decision_levels_amount = 0;
+                self.clause_theory.restart(&self.variable_manager, self.conflict_count);
+
             } else {
                 // 決定変数を選択
                 self.decide();
@@ -237,7 +260,7 @@ impl SATSolver {
         // MEMO: このあたりはもう少しマシな設計がある気がする
         // 割り当てを説明する節を取得
         self.literal_buffer.clear();
-        self.clause_theory.explain(variable_index, value, reason, &mut self.literal_buffer);
+        self.clause_theory.explain(variable_index, value, reason, self.conflict_count,&mut self.literal_buffer);
         // 節を analyzer_buffer に融合
         for literal in self.literal_buffer.iter() {
             if self.analyzer_buffer.contains_key(literal.index) {
@@ -301,7 +324,7 @@ impl SATSolver {
                 let second_largest_decision_level = first_three_decision_levels[1..].iter().max().unwrap_or(&0);
                 if *second_largest_decision_level < self.variable_manager.current_decision_level() {
                     // 2 番目に大きい決定レベルが現在の決定レベル未満であればバックジャンプ可能なので，現在の節を学習節として返す
-                    let mut learnt_clause = Vec::default();
+                    let mut learnt_clause = Vec::with_capacity(self.analyzer_buffer.len());
                     for (variable_index, buffer_value) in self.analyzer_buffer.iter() {
                         learnt_clause.push(Literal { index: *variable_index, sign: buffer_value.sign });
                     }

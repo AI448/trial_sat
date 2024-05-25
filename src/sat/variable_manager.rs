@@ -4,7 +4,7 @@ use super::types::Literal;
 #[derive(Clone, Copy)]
 pub enum Reason {
     Decision,
-    Propagation { clause_index: usize, assignment_level_at_propagated: usize },
+    Propagation { clause_index: usize, pldb_upper: u64, assignment_level_at_propagated: usize },
 }
 
 /// 変数の状態

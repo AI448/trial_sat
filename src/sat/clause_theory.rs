@@ -20,6 +20,7 @@ struct Clause {
     is_learnt: bool,
     plbd: u64,
     is_deleted: bool,
+    last_used_time_stamp: usize,
     activity: f64,
 }
 
@@ -33,6 +34,7 @@ pub struct ClauseTheory {
     plbd_ammount: u64,
     current_plbd_ammount: u64,
     current_plbd_deque: VecDeque<u64>,
+    reduction_time_stamp: usize,
     check_count: usize,
     skip_by_cached_count: usize,
     skip_by_another_count: usize,
@@ -52,6 +54,7 @@ impl ClauseTheory {
             plbd_ammount: 0,
             current_plbd_ammount: 0,
             current_plbd_deque: VecDeque::default(),
+            reduction_time_stamp: 0,
             check_count: 0,
             skip_by_cached_count: 0,
             skip_by_another_count: 0,
@@ -69,25 +72,44 @@ impl ClauseTheory {
         variable_manager: &VariableManager,
         mut literals: Vec<Literal>,
         is_learnt: bool,
+        conflict_count: usize,
         tentative_assigned_variable_queue: &mut TentativeAssignedVariableQueue,
     ) {
         // TODO: あとで対応(すべてのリテラルに偽が割り当てられているケースはひとまず考えない)
         assert!(!literals.iter().all(|literal| variable_manager.is_false(*literal)));
         let clause_index = self.clause_infos.len();
+
+        let plbd;
+
         if literals.len() == 0 {
             assert!(false); // TODO: あとで対応(上の all での判定で除かれるはず)
+            plbd = 0;
         } else if literals.len() == 1 {
+            plbd = 1;
             if !variable_manager.is_assigned(literals[0]) {
                 tentative_assigned_variable_queue.insert(
                     literals[0].index,
                     literals[0].sign,
                     Reason::Propagation {
                         clause_index: clause_index,
+                        pldb_upper: plbd,
                         assignment_level_at_propagated: variable_manager.current_assignment_level(),
                     },
                 );
             }
         } else {
+            plbd = self.calculate_plbd.calculate(variable_manager, &literals);
+            debug_assert!(literals.len() <= 1 || plbd >= 2);
+            self.number_of_learnt_clauses += 1;
+            self.plbd_ammount += plbd;
+
+            self.current_plbd_deque.push_back(plbd);
+            self.current_plbd_ammount += plbd;
+            if self.current_plbd_deque.len() > 50 {
+                let forgetting_plbd = self.current_plbd_deque.pop_front().unwrap();
+                self.current_plbd_ammount -= forgetting_plbd;
+            }
+
             /* 割当の状態に応じてリテラルをソート
              * 1. 真が割り当てられている -> 未割り当て -> 偽が割り当てられているの順
              * 2. 真が割り当てられているリテラル同士では割当レベルの昇順
@@ -118,35 +140,20 @@ impl ClauseTheory {
                         literals[0].sign,
                         Reason::Propagation {
                             clause_index: clause_index,
+                            pldb_upper: plbd,
                             assignment_level_at_propagated: variable_manager.current_assignment_level(),
                         },
                     );
                 }
             }
         }
-        //
-        let plbd;
-        if is_learnt {
-            plbd = self.calculate_plbd.calculate(variable_manager, &literals);
-            debug_assert!(literals.len() <= 1 || plbd >= 2);
-            self.number_of_learnt_clauses += 1;
-            self.plbd_ammount += plbd;
-
-            self.current_plbd_deque.push_back(plbd);
-            self.current_plbd_ammount += plbd;
-            if self.current_plbd_deque.len() > 50 {
-                let forgetting_plbd = self.current_plbd_deque.pop_front().unwrap();
-                self.current_plbd_ammount -= forgetting_plbd;
-            }
-        } else {
-            plbd = 0;
-        }
         // 節を追加
         self.clause_infos.push(Clause {
             literals: literals,
             is_learnt: is_learnt,
-            plbd,
+            plbd: plbd,
             is_deleted: false,
+            last_used_time_stamp: conflict_count,
             activity: self.activity_increase_value,
         });
     }
@@ -200,36 +207,45 @@ impl ClauseTheory {
                     }
                     // 真が割り当てられているまたは未割り当てのリテラルが見つからなかった場合
                     debug_assert!(!variable_manager.is_false(another_watched_literal)); // もう一方の監視リテラルに false が割り当てられていることはないはず
-                    // もう一方の監視リテラルに真を割り当て
+                    
                     self.propagation_count += 1;
+                    // plbd を計算
+                    let plbd = self.calculate_plbd.calculate(variable_manager, &clause.literals);
+                    if clause.is_learnt && plbd < clause.plbd {
+                        clause.plbd = plbd;
+                    }
+                    // 
+                    let mut pldb_upper = plbd;
+                    for literal in clause.literals.iter() {
+                        if let VariableState::Assigned { reason , ..} = variable_manager.get_state(literal.index) {
+                            if let Reason::Propagation { pldb_upper: u, ..} = reason {
+                                pldb_upper += u.max(2) - 2;
+                            }
+                        }
+                    }
+                    // もう一方の監視リテラルに真を割り当て
                     tentative_assigned_variable_queue.insert(
                         another_watched_literal.index,
                         another_watched_literal.sign,
                         Reason::Propagation {
                             clause_index: clause_index,
+                            pldb_upper: pldb_upper,
                             assignment_level_at_propagated: variable_manager.current_assignment_level(),
                         },
                     );
-                    if clause.is_learnt {
-                        // pseudo_lbd を更新
-                        let pseudo_lbd = self.calculate_plbd.calculate(variable_manager, &clause.literals);
-                        if pseudo_lbd < clause.plbd {
-                            self.plbd_ammount -= clause.plbd - pseudo_lbd;
-                            clause.plbd = pseudo_lbd;
-                        }
-                    }
                 }
             }
             k += 1;
         }
     }
 
-    pub fn explain(&mut self, variable_index: usize, value: bool, reason: Reason, clause: &mut Vec<Literal>) {
+    pub fn explain(&mut self, variable_index: usize, value: bool, reason: Reason, conflict_count: usize, clause: &mut Vec<Literal>) {
         assert!(matches!(reason, Reason::Propagation { .. }));
         let Reason::Propagation { clause_index, .. } = reason else {
             unreachable!();
         };
         assert!(self.clause_infos[clause_index].literals.iter().any(|l| l.index == variable_index && l.sign == value));
+        self.clause_infos[clause_index].last_used_time_stamp = conflict_count;
         self.clause_infos[clause_index].activity += self.activity_increase_value;
         clause.clone_from(&self.clause_infos[clause_index].literals);
     }
@@ -246,18 +262,17 @@ impl ClauseTheory {
         }
     }
 
-    pub fn is_request_restart(&self) -> bool {
+    pub fn is_request_restart(&self, conflict_count: usize) -> bool {
         if self.number_of_learnt_clauses == 0 {
             false
         } else {
             let pseudo_lbd_average = self.plbd_ammount as f64 / self.number_of_learnt_clauses as f64;
             let current_pseudo_lbd_average = self.current_plbd_ammount as f64 / 50.0;
-            self.number_of_learnt_clauses > 10000 + 1000 * (self.clause_reduction_count + 1)
-                || current_pseudo_lbd_average * 0.9 > pseudo_lbd_average
+            current_pseudo_lbd_average * 0.7 > pseudo_lbd_average || conflict_count > self.reduction_time_stamp + 11000
         }
     }
 
-    pub fn restart(&mut self, variable_manager: &VariableManager) {
+    pub fn restart(&mut self, variable_manager: &VariableManager, conflict_count: usize) {
         assert!(variable_manager.current_decision_level() == 0);
         eprintln!(
             "pldb_average={} current_pldb_average={}",
@@ -266,22 +281,46 @@ impl ClauseTheory {
         );
         self.current_plbd_ammount = 0;
         self.current_plbd_deque.clear();
-        if self.number_of_learnt_clauses > 10000 + 1000 * self.clause_reduction_count {
+        if conflict_count > self.reduction_time_stamp + 10000 {
             self.clause_reduction_count += 1;
+            self.reduction_time_stamp = conflict_count;
+            // 決定レベル 0 で充足されている節を削除
+            for clause in self.clause_infos.iter_mut().filter(|c| !c.is_deleted) {
+                let satisfied = clause.literals.iter().any(|l| variable_manager.is_true(*l));
+                if satisfied {
+                    clause.is_deleted = true;
+                    clause.literals.clear();
+                    clause.literals.shrink_to_fit();
+                } else {
+                    // fix されている変数を節から削除(2 つ目のリテラルまでは監視対象かもしれないのでひとまず触らない)
+                    let mut k = 2;
+                    while k < clause.literals.len() {
+                        if variable_manager.is_false(clause.literals[k]) {
+                            clause.literals.swap_remove(k);
+                        } else {
+                            k += 1;
+                        }
+                    }
+                }
+            }
+
+            // 削除対象の候補を列挙
             let mut clause_priority_order = Vec::from_iter(
                 (0..self.clause_infos.len())
-                    .filter(|i| self.clause_infos[*i].is_learnt && !self.clause_infos[*i].is_deleted),
+                    .filter(|i| self.clause_infos[*i].is_learnt && !self.clause_infos[*i].is_deleted && self.clause_infos[*i].plbd > 3 && (self.clause_infos[*i].plbd > 6 || self.clause_infos[*i].last_used_time_stamp + 30000 < conflict_count)),
             );
-            debug_assert!(clause_priority_order.len() == self.number_of_learnt_clauses);
             // 削除の優先度の高い順にソート
             clause_priority_order.sort_unstable_by(|l, r| {
-                let lhs = (3 - self.clause_infos[*l].plbd.min(3), self.clause_infos[*l].activity);
-                let rhs = (3 - self.clause_infos[*r].plbd.min(3), self.clause_infos[*r].activity);
+                let lhs = self.clause_infos[*l].activity;
+                let rhs = self.clause_infos[*r].activity;
                 lhs.partial_cmp(&rhs).unwrap()
             });
-            // とりあえず半分ぐらいを削除
+            // 半分削除
             for clause_index in clause_priority_order.iter().take(clause_priority_order.len() / 2) {
-                self.clause_infos[*clause_index].is_deleted = true;
+                let clause = &mut self.clause_infos[*clause_index];
+                clause.is_deleted = true;
+                clause.literals.clear();
+                clause.literals.shrink_to_fit();
             }
             // 削除された節の監視を削除
             for variable_index in 0..variable_manager.number_of_variables() {
@@ -306,7 +345,11 @@ impl ClauseTheory {
                     self.plbd_ammount += clause.plbd;
                 }
             }
-            eprintln!("reduce learnt clauses {} -> {}", clause_priority_order.len(), self.number_of_learnt_clauses);
+            eprintln!(
+                "reduce learnt clauses {} -> {} pldb_average={}",
+                clause_priority_order.len(),
+                self.number_of_learnt_clauses,
+                self.plbd_ammount as f64 / self.number_of_learnt_clauses as f64);
         }
     }
 
