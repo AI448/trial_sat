@@ -1,11 +1,13 @@
-use std::collections::VecDeque;
 
 use super::calculate_pseudo_lbd::CalculatePseudoLBD;
+use super::exponential_smoother::ExponentialSmootherWithRunUpPeriod;
+use super::exponential_smoother::ExponentialSmoother;
 use super::tentative_assigned_variable_queue::TentativeAssignedVariableQueue;
 use super::types::Literal;
 use super::variable_manager::Reason;
 use super::variable_manager::VariableManager;
 use super::variable_manager::VariableState;
+
 
 #[derive(Clone, Copy)]
 struct WatchedBy {
@@ -30,10 +32,8 @@ pub struct ClauseTheory {
     watched_infos: Vec<[Vec<WatchedBy>; 2]>, // NOTE: Literal を添え字にしてアクセスできる配列を使いたい
     clause_infos: Vec<Clause>,
     calculate_plbd: CalculatePseudoLBD,
-    number_of_learnt_clauses: usize,
-    plbd_ammount: u64,
-    current_plbd_ammount: u64,
-    current_plbd_deque: VecDeque<u64>,
+    lbd_average: ExponentialSmootherWithRunUpPeriod,
+    current_lbd_average: ExponentialSmoother,
     reduction_time_stamp: usize,
     check_count: usize,
     skip_by_cached_count: usize,
@@ -50,10 +50,8 @@ impl ClauseTheory {
             watched_infos: Vec::default(),
             clause_infos: Vec::default(),
             calculate_plbd: CalculatePseudoLBD::default(),
-            number_of_learnt_clauses: 0,
-            plbd_ammount: 0,
-            current_plbd_ammount: 0,
-            current_plbd_deque: VecDeque::default(),
+            lbd_average: ExponentialSmootherWithRunUpPeriod::new(1e4, 1e4),
+            current_lbd_average: ExponentialSmoother::new(1e2),
             reduction_time_stamp: 0,
             check_count: 0,
             skip_by_cached_count: 0,
@@ -100,15 +98,8 @@ impl ClauseTheory {
         } else {
             plbd = self.calculate_plbd.calculate(variable_manager, &literals);
             debug_assert!(literals.len() <= 1 || plbd >= 2);
-            self.number_of_learnt_clauses += 1;
-            self.plbd_ammount += plbd;
-
-            self.current_plbd_deque.push_back(plbd);
-            self.current_plbd_ammount += plbd;
-            if self.current_plbd_deque.len() > 50 {
-                let forgetting_plbd = self.current_plbd_deque.pop_front().unwrap();
-                self.current_plbd_ammount -= forgetting_plbd;
-            }
+            self.lbd_average.add(plbd as f64);
+            self.current_lbd_average.add(plbd as f64);
 
             /* 割当の状態に応じてリテラルをソート
              * 1. 真が割り当てられている -> 未割り当て -> 偽が割り当てられているの順
@@ -263,24 +254,18 @@ impl ClauseTheory {
     }
 
     pub fn is_request_restart(&self, conflict_count: usize) -> bool {
-        if self.number_of_learnt_clauses == 0 {
-            false
-        } else {
-            let pseudo_lbd_average = self.plbd_ammount as f64 / self.number_of_learnt_clauses as f64;
-            let current_pseudo_lbd_average = self.current_plbd_ammount as f64 / 50.0;
-            current_pseudo_lbd_average * 0.7 > pseudo_lbd_average || conflict_count > self.reduction_time_stamp + 11000
-        }
+        self.current_lbd_average.get() > 1.01 * self.lbd_average.get() || conflict_count > self.reduction_time_stamp + 11000
     }
 
     pub fn restart(&mut self, variable_manager: &VariableManager, conflict_count: usize) {
         assert!(variable_manager.current_decision_level() == 0);
         eprintln!(
             "pldb_average={} current_pldb_average={}",
-            self.plbd_ammount as f64 / self.number_of_learnt_clauses as f64,
-            self.current_plbd_ammount as f64 / 50.0
+            self.lbd_average.get(),
+            self.current_lbd_average.get()
         );
-        self.current_plbd_ammount = 0;
-        self.current_plbd_deque.clear();
+        self.current_lbd_average.reset();
+
         if conflict_count > self.reduction_time_stamp + 10000 {
             self.clause_reduction_count += 1;
             self.reduction_time_stamp = conflict_count;
@@ -337,19 +322,19 @@ impl ClauseTheory {
                 }
             }
             // 全体の PLDB を再計算
-            self.number_of_learnt_clauses = 0;
-            self.plbd_ammount = 0;
+            let mut number_of_learnt_clauses = 0;
+            let mut plbd_ammount = 0;
             for clause in self.clause_infos.iter() {
                 if clause.is_learnt && !clause.is_deleted {
-                    self.number_of_learnt_clauses += 1;
-                    self.plbd_ammount += clause.plbd;
+                    number_of_learnt_clauses += 1;
+                    plbd_ammount += clause.plbd;
                 }
             }
             eprintln!(
                 "reduce learnt clauses {} -> {} pldb_average={}",
                 clause_priority_order.len(),
-                self.number_of_learnt_clauses,
-                self.plbd_ammount as f64 / self.number_of_learnt_clauses as f64);
+                number_of_learnt_clauses,
+                plbd_ammount as f64 / number_of_learnt_clauses as f64);
         }
     }
 
