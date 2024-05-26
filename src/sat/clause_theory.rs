@@ -96,7 +96,7 @@ impl ClauseTheory {
                 );
             }
         } else {
-            plbd = self.calculate_plbd.calculate(variable_manager, &literals);
+            plbd = if is_learnt { self.calculate_plbd.calculate(variable_manager, &literals) } else { literals.len() as u64 };
 
             /* 割当の状態に応じてリテラルをソート
              * 1. 真が割り当てられている -> 未割り当て -> 偽が割り当てられているの順
@@ -137,8 +137,10 @@ impl ClauseTheory {
         }
         //
         debug_assert!(literals.len() <= 1 || plbd >= 2);
-        self.lbd_average.add(plbd as f64);
-        self.current_lbd_average.add(plbd as f64);
+        if is_learnt {
+            self.lbd_average.add(plbd as f64);
+            self.current_lbd_average.add(plbd as f64);
+        }
         // 節を追加
         self.clause_infos.push(Clause {
             literals: literals,
@@ -259,7 +261,7 @@ impl ClauseTheory {
     }
 
     pub fn is_request_restart(&self, conflict_count: usize) -> bool {
-        self.current_lbd_average.get() >= self.lbd_average.get() || conflict_count > self.reduction_time_stamp + 100000
+        self.current_lbd_average.get() > self.lbd_average.get() || conflict_count > self.reduction_time_stamp + 50000
     }
 
     pub fn restart(&mut self, variable_manager: &VariableManager, conflict_count: usize) {
@@ -271,7 +273,7 @@ impl ClauseTheory {
         );
         self.current_lbd_average.reset();
 
-        if conflict_count > self.reduction_time_stamp + 10000 {
+        if conflict_count > self.reduction_time_stamp + 5000 {
             self.clause_reduction_count += 1;
             self.reduction_time_stamp = conflict_count;
             // 決定レベル 0 で充足されている節を削除
@@ -297,7 +299,7 @@ impl ClauseTheory {
             // 削除対象の候補を列挙
             let mut clause_priority_order = Vec::from_iter(
                 (0..self.clause_infos.len())
-                    .filter(|i| self.clause_infos[*i].is_learnt && !self.clause_infos[*i].is_deleted && self.clause_infos[*i].plbd > 3 && (self.clause_infos[*i].plbd > 6 || self.clause_infos[*i].last_used_time_stamp + 30000 < conflict_count)),
+                    .filter(|i| self.clause_infos[*i].is_learnt && !self.clause_infos[*i].is_deleted && self.clause_infos[*i].plbd > 3 && (self.clause_infos[*i].plbd > 6 || self.clause_infos[*i].last_used_time_stamp + 30000 < conflict_count) && self.clause_infos[*i].last_used_time_stamp + 1000 < conflict_count),
             );
             // 削除の優先度の高い順にソート
             clause_priority_order.sort_unstable_by(|l, r| {
@@ -305,8 +307,8 @@ impl ClauseTheory {
                 let rhs = self.clause_infos[*r].activity;
                 lhs.partial_cmp(&rhs).unwrap()
             });
-            // 半分削除
-            for clause_index in clause_priority_order.iter().take(clause_priority_order.len() / 2) {
+            // 1/4 削除
+            for clause_index in clause_priority_order.iter().take(clause_priority_order.len() / 4) {
                 let clause = &mut self.clause_infos[*clause_index];
                 clause.is_deleted = true;
                 clause.literals.clear();
@@ -336,8 +338,7 @@ impl ClauseTheory {
                 }
             }
             eprintln!(
-                "reduce learnt clauses {} -> {} pldb_average={}",
-                clause_priority_order.len(),
+                "reduce learnt clauses {} pldb_average={}",
                 number_of_learnt_clauses,
                 plbd_ammount as f64 / number_of_learnt_clauses as f64);
         }
