@@ -50,8 +50,8 @@ impl ClauseTheory {
             watched_infos: Vec::default(),
             clause_infos: Vec::default(),
             calculate_plbd: CalculatePseudoLBD::default(),
-            lbd_average: ExponentialSmootherWithRunUpPeriod::new(1e4, 1e4),
-            current_lbd_average: ExponentialSmoother::new(1e2),
+            lbd_average: ExponentialSmootherWithRunUpPeriod::new(1e6, 1e6),
+            current_lbd_average: ExponentialSmoother::new(1e1),
             reduction_time_stamp: 0,
             check_count: 0,
             skip_by_cached_count: 0,
@@ -97,9 +97,6 @@ impl ClauseTheory {
             }
         } else {
             plbd = self.calculate_plbd.calculate(variable_manager, &literals);
-            debug_assert!(literals.len() <= 1 || plbd >= 2);
-            self.lbd_average.add(plbd as f64);
-            self.current_lbd_average.add(plbd as f64);
 
             /* 割当の状態に応じてリテラルをソート
              * 1. 真が割り当てられている -> 未割り当て -> 偽が割り当てられているの順
@@ -138,6 +135,10 @@ impl ClauseTheory {
                 }
             }
         }
+        //
+        debug_assert!(literals.len() <= 1 || plbd >= 2);
+        self.lbd_average.add(plbd as f64);
+        self.current_lbd_average.add(plbd as f64);
         // 節を追加
         self.clause_infos.push(Clause {
             literals: literals,
@@ -179,6 +180,7 @@ impl ClauseTheory {
                 if variable_manager.is_true(another_watched_literal) {
                     // もう一方の監視リテラルに真が割り当てられており既に充足されている場合
                     self.skip_by_another_count += 1;
+                    // another_watched_literal をキャッシュしておく
                     self.watched_infos[assigned_variable_index][assigned_value as usize][k].cached_another_literal = Some(another_watched_literal);
                 } else {
                     // 監視対象ではないリテラルを走査
@@ -206,21 +208,24 @@ impl ClauseTheory {
                         clause.plbd = plbd;
                     }
                     // 
-                    let mut pldb_upper = plbd;
+                    let mut pldbd_upper = plbd;
                     for literal in clause.literals.iter() {
-                        if let VariableState::Assigned { reason , ..} = variable_manager.get_state(literal.index) {
-                            if let Reason::Propagation { pldb_upper: u, ..} = reason {
-                                pldb_upper += u.max(2) - 2;
+                        if let VariableState::Assigned {decision_level, reason , ..} = variable_manager.get_state(literal.index) {
+                            if decision_level == variable_manager.current_decision_level() {
+                                if let Reason::Propagation { pldb_upper: u, ..} = reason {
+                                    pldbd_upper += u.max(2) - 2;
+                                }
                             }
                         }
                     }
+                    pldbd_upper = pldbd_upper.min((variable_manager.current_decision_level() + 1) as u64);
                     // もう一方の監視リテラルに真を割り当て
                     tentative_assigned_variable_queue.insert(
                         another_watched_literal.index,
                         another_watched_literal.sign,
                         Reason::Propagation {
                             clause_index: clause_index,
-                            pldb_upper: pldb_upper,
+                            pldb_upper: pldbd_upper,
                             assignment_level_at_propagated: variable_manager.current_assignment_level(),
                         },
                     );
@@ -254,7 +259,7 @@ impl ClauseTheory {
     }
 
     pub fn is_request_restart(&self, conflict_count: usize) -> bool {
-        self.current_lbd_average.get() > 1.01 * self.lbd_average.get() || conflict_count > self.reduction_time_stamp + 11000
+        self.current_lbd_average.get() >= self.lbd_average.get() || conflict_count > self.reduction_time_stamp + 100000
     }
 
     pub fn restart(&mut self, variable_manager: &VariableManager, conflict_count: usize) {

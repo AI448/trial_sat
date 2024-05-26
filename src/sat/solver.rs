@@ -34,9 +34,6 @@ pub struct SATSolver {
     // TODO これが必要になるなら analyze も別の構造体とした方がよいか
     literal_buffer: Vec<Literal>,
     analyzer_buffer: finite_collections::FiniteHeapedMap<AnalyzerBufferValue, AnalyzerBufferComparator>,
-    // conflicting_decision_level_amount: usize,
-    // current_conflicting_decision_levels: VecDeque<usize>,
-    // current_conflicting_decision_levels_amount: usize,
     conflict_count: usize,
     restart_count: usize,
 }
@@ -47,13 +44,10 @@ impl SATSolver {
         SATSolver {
             variable_manager: VariableManager::default(),
             tentative_assigned_variable_queue: TentativeAssignedVariableQueue::default(),
-            unassigned_variable_queue: UnassignedVariableQueue::new(1e5),
-            clause_theory: ClauseTheory::new(1e4),
+            unassigned_variable_queue: UnassignedVariableQueue::new(1e4),
+            clause_theory: ClauseTheory::new(1e3),
             literal_buffer: Vec::default(),
             analyzer_buffer: finite_collections::FiniteHeapedMap::default(),
-            // conflicting_decision_level_amount: 0,
-            // current_conflicting_decision_levels: VecDeque::default(),
-            // current_conflicting_decision_levels_amount: 0,
             conflict_count: 0usize,
             restart_count: 0usize,
         }
@@ -126,14 +120,6 @@ impl SATSolver {
             let propagation_result = self.propagate();
             if let PropagationResult::Conflict { variable_index, reasons } = propagation_result {
                 // 矛盾を検知した場合
-                let current_decision_level = self.variable_manager.current_decision_level();
-                // self.conflicting_decision_level_amount += current_decision_level;
-                // self.current_conflicting_decision_levels.push_back(current_decision_level);
-                // self.current_conflicting_decision_levels_amount += current_decision_level;
-                // if self.current_conflicting_decision_levels.len() > 50 {
-                //     let forgetting_decition_level = self.current_conflicting_decision_levels.pop_front().unwrap();
-                //     self.current_conflicting_decision_levels_amount -= forgetting_decition_level;
-                // }
                 self.conflict_count += 1;
                 // 決定レベル 0 での矛盾であれば充足不可能
                 if self.variable_manager.current_decision_level() == 0 {
@@ -167,10 +153,7 @@ impl SATSolver {
                     self.backjump(0);
                 }
                 eprintln!("restart_count={} conflict_count={} fixed={}", self.restart_count, self.conflict_count, self.variable_manager.number_of_assigned_variables());
-                // eprintln!("cdl_average={} current_cdl_average={}", self.conflicting_decision_level_amount as f64 / self.conflict_count as f64, self.current_conflicting_decision_levels_amount as f64 / 50.0);
                 self.restart_count += 1;
-                // self.current_conflicting_decision_levels.clear();
-                // self.current_conflicting_decision_levels_amount = 0;
                 self.clause_theory.restart(&self.variable_manager, self.conflict_count);
 
             } else {

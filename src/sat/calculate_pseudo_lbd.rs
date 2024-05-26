@@ -1,4 +1,5 @@
-use super::super::finite_collections;
+use crate::finite_collections;
+
 use super::types::Literal;
 use super::variable_manager::{VariableManager, VariableState};
 
@@ -18,7 +19,7 @@ impl CalculatePseudoLBD {
         let mut pseudo_lbd = 0u64;
         for literal in literals.iter() {
             if let VariableState::Assigned { decision_level, .. } = variable_manager.get_state(literal.index) {
-                if !self.decision_level_set.contains_key(decision_level) {
+                if decision_level != 0 && !self.decision_level_set.contains_key(decision_level) {
                     self.decision_level_set.insert(decision_level);
                     pseudo_lbd += 1;
                 }
