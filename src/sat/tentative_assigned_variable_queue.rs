@@ -1,16 +1,13 @@
 use std::cmp::Ordering;
 
-use crate::finite_collections::Comparator;
-use crate::finite_collections::FiniteHeapedMap;
 use super::types::VariableSize;
 use super::variable_manager::Reason;
-
+use crate::finite_collections::{Comparator, FiniteHeapedMap};
 
 /// 仮割当変数の優先度付きキュー
 /// 矛盾の検知もこの構造体で行う
 #[derive(Default)]
 pub struct TentativeAssignedVariableQueue {
-    // TODO: conflicting_variable_queue の要素は順序付けできないのでただの map でいい
     conflicting_variables: FiniteHeapedMap<VariableSize, [Reason; 2], ConflictingVariableComparator>,
     consistent_variables: FiniteHeapedMap<VariableSize, (bool, Reason), ConsistentVariableComparator>,
 }
@@ -39,12 +36,12 @@ impl TentativeAssignedVariableQueue {
     }
 
     #[inline(always)]
-    pub fn iter_conflicting_variables(&self) -> impl Iterator<Item = &(VariableSize, [Reason; 2])> {
-        self.conflicting_variables.iter()
+    pub fn pop_conflicting_variable(&mut self) -> Option<(VariableSize, [Reason; 2])> {
+        self.conflicting_variables.pop_first()
     }
 
     #[inline(never)]
-    pub fn pop_first_consistent_variable(&mut self) -> Option<(VariableSize, bool, Reason)> {
+    pub fn pop_consistent_variable(&mut self) -> Option<(VariableSize, bool, Reason)> {
         match self.consistent_variables.pop_first() {
             Some((variable_index, (value, reason))) => Some((variable_index, value, reason)),
             None => None,
@@ -52,7 +49,7 @@ impl TentativeAssignedVariableQueue {
     }
 
     #[inline(never)]
-    pub fn insert(&mut self, variable_index: VariableSize, value: bool, reason: Reason) {
+    pub fn push(&mut self, variable_index: VariableSize, value: bool, reason: Reason) {
         if self.conflicting_variables.contains_key(variable_index) {
             // variable_index が既にに矛盾している場合
             let original_reasons = self.conflicting_variables.get(variable_index).unwrap();
@@ -103,9 +100,9 @@ impl TentativeAssignedVariableComparator {
     pub fn reason_to_tuple(reason: &Reason) -> (u8, VariableSize, VariableSize) {
         match reason {
             Reason::Decision => (0, 0, 0),
-            Reason::Propagation {pldb_upper, assignment_level_at_propagated, .. } => (1, *pldb_upper, *assignment_level_at_propagated),
-            // Reason::Propagation {pldb_upper, assignment_level_at_propagated, .. } => (1, *assignment_level_at_propagated, *pldb_upper),            
-            // Reason::Propagation {assignment_level_at_propagated, .. } => (1, 0, *assignment_level_at_propagated),            
+            Reason::Propagation { lbd: pldb_upper, assignment_level_at_propagated, .. } => {
+                (1, *pldb_upper, *assignment_level_at_propagated)
+            }
         }
     }
 
@@ -130,7 +127,6 @@ impl Comparator<VariableSize, (bool, Reason)> for ConsistentVariableComparator {
 struct ConflictingVariableComparator {}
 
 impl Comparator<VariableSize, [Reason; 2]> for ConflictingVariableComparator {
-    
     #[inline(always)]
     fn compare(lhs: &(VariableSize, [Reason; 2]), rhs: &(VariableSize, [Reason; 2])) -> Ordering {
         let l0 = TentativeAssignedVariableComparator::reason_to_tuple(&lhs.1[0]);

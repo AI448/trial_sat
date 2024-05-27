@@ -1,6 +1,5 @@
-
-use crate::finite_collections::{Array, FiniteHeapedMap, Comparator};
 use super::types::VariableSize;
+use crate::finite_collections::{Array, Comparator, FiniteHeapedMap};
 
 /// 未割り当て変数の優先度付きキュー
 pub struct UnassignedVariableQueue {
@@ -35,11 +34,11 @@ impl UnassignedVariableQueue {
         self.queue.reserve(additional);
     }
 
-    pub fn insert(&mut self, variable_index: VariableSize) {
+    pub fn push(&mut self, variable_index: VariableSize) {
         self.queue.insert(variable_index, self.activities[variable_index]);
     }
 
-    pub fn pop_first(&mut self) -> Option<VariableSize> {
+    pub fn pop(&mut self) -> Option<VariableSize> {
         match self.queue.pop_first() {
             Some((variable_index, ..)) => Some(variable_index),
             None => None,

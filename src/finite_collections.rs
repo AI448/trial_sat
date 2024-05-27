@@ -1,8 +1,8 @@
 // mod finite_heaped_map;
-mod size;
 mod array;
 mod base;
 mod set;
+mod size;
 
 pub use array::Array;
 pub use base::Comparator;

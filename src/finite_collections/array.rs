@@ -1,45 +1,39 @@
-
-use std::ops::{Index, IndexMut, FnMut};
-use std::slice::{Iter, IterMut};
 use std::marker::PhantomData;
+use std::ops::{FnMut, Index, IndexMut};
+use std::slice::{Iter, IterMut};
 
 use super::size::Size;
 
 #[derive(Clone)]
 pub struct Array<SizeT, ValueT>
 where
-    SizeT: Size
+    SizeT: Size,
 {
     vec: Vec<ValueT>,
-    phantom: PhantomData<SizeT>
+    phantom: PhantomData<SizeT>,
 }
-
 
 impl<SizeT, ValueT> Default for Array<SizeT, ValueT>
 where
-    SizeT: Size
+    SizeT: Size,
 {
     fn default() -> Self {
-        Array {
-            vec: Vec::default(),
-            phantom: PhantomData::default(),
-        }
+        Array { vec: Vec::default(), phantom: PhantomData::default() }
     }
 }
 
 impl<SizeT, ValueT> Array<SizeT, ValueT>
 where
-    SizeT: Size
+    SizeT: Size,
 {
-
     pub fn capacity(&self) -> SizeT {
         debug_assert!(self.vec.capacity() <= SizeT::MAX.as_usize());
-        unsafe {SizeT::from(self.vec.capacity()).unwrap_unchecked()}
+        unsafe { SizeT::from(self.vec.capacity()).unwrap_unchecked() }
     }
 
     pub fn len(&self) -> SizeT {
         debug_assert!(self.vec.len() <= SizeT::MAX.as_usize());
-        unsafe {SizeT::from(self.vec.len()).unwrap_unchecked()}
+        unsafe { SizeT::from(self.vec.len()).unwrap_unchecked() }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -64,7 +58,7 @@ where
 
     pub fn resize_with<F>(&mut self, new_len: SizeT, f: F)
     where
-        F: FnMut() -> ValueT
+        F: FnMut() -> ValueT,
     {
         self.vec.resize_with(new_len.as_usize(), f);
     }
@@ -96,17 +90,16 @@ where
     pub fn sort_by_cached_key<K, F>(&mut self, f: F)
     where
         F: FnMut(&ValueT) -> K,
-        K: Ord
+        K: Ord,
     {
         self.vec.sort_by_cached_key(f)
     }
-
 }
 
 impl<SizeT, ValueT> Array<SizeT, ValueT>
 where
     SizeT: Size,
-    ValueT: Clone
+    ValueT: Clone,
 {
     pub fn resize(&mut self, new_len: SizeT, value: ValueT) {
         self.vec.resize(new_len.as_usize(), value);
@@ -115,12 +108,11 @@ where
     pub fn clone_from(&mut self, other: &Self) {
         self.vec.clone_from(&other.vec)
     }
-
 }
 
 impl<SizeT, ValueT> Index<SizeT> for Array<SizeT, ValueT>
 where
-    SizeT: Size
+    SizeT: Size,
 {
     type Output = ValueT;
     fn index(&self, index: SizeT) -> &Self::Output {
@@ -130,7 +122,7 @@ where
 
 impl<SizeT, ValueT> IndexMut<SizeT> for Array<SizeT, ValueT>
 where
-    SizeT: Size
+    SizeT: Size,
 {
     fn index_mut(&mut self, index: SizeT) -> &mut Self::Output {
         &mut self.vec[index.as_usize()]

@@ -1,6 +1,5 @@
+use super::types::{ConstraintSize, Literal, VariableSize};
 use crate::finite_collections::Array;
-use super::types::{VariableSize, ConstraintSize, Literal};
-
 
 #[derive(Default)]
 pub struct SATProblem {

@@ -1,11 +1,11 @@
-use super::types::{VariableSize, ConstraintSize, Literal};
+use super::types::{ConstraintSize, Literal, VariableSize};
 use crate::finite_collections::Array;
 
 /// 割り当て理由
 #[derive(Clone, Copy)]
 pub enum Reason {
     Decision,
-    Propagation { clause_index: ConstraintSize, pldb_upper: VariableSize, assignment_level_at_propagated: VariableSize },
+    Propagation { clause_index: ConstraintSize, lbd: VariableSize, assignment_level_at_propagated: VariableSize },
 }
 
 /// 変数の状態

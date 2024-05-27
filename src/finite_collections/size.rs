@@ -1,8 +1,6 @@
-
 use num::{PrimInt, Unsigned};
 
-pub trait Size: PrimInt + Unsigned
-{
+pub trait Size: PrimInt + Unsigned {
     const ZERO: Self;
     const MAX: Self;
     fn as_usize(&self) -> usize;

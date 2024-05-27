@@ -1,19 +1,17 @@
 // use std::collections::VecDeque;
 
-use crate::finite_collections::{Array, FiniteHeapedMap, Comparator};
+use crate::finite_collections::{Array, Comparator, FiniteHeapedMap};
 
 use super::clause_theory::ClauseTheory;
 use super::tentative_assigned_variable_queue::TentativeAssignedVariableQueue;
-use super::types::{VariableSize, ConstraintSize, Literal};
+use super::types::{ConstraintSize, Literal, VariableSize};
 use super::unassigned_variable_queue::UnassignedVariableQueue;
-use super::variable_manager::Reason;
-use super::variable_manager::VariableManager;
-use super::variable_manager::VariableState;
+use super::variable_manager::{Reason, VariableManager, VariableState};
 
 enum SearchResult {
     Satisfiable,
     Unsatisfiable,
-    Undefined,
+    // Undefined,
 }
 
 enum PropagationResult {
@@ -64,7 +62,7 @@ impl SATSolver {
         self.unassigned_variable_queue.reserve(additional);
         // 追加した変数を未割り当て変数のキューに挿入
         for variable_index in original..self.variable_manager.number_of_variables() {
-            self.unassigned_variable_queue.insert(variable_index);
+            self.unassigned_variable_queue.push(variable_index);
         }
         self.clause_theory.expand(additional);
         assert!(self.tentative_assigned_variable_queue.capacity() == self.variable_manager.number_of_variables());
@@ -106,16 +104,14 @@ impl SATSolver {
             }
             SearchResult::Unsatisfiable => {
                 return SATSolverResult::Unsatisfiable;
-            }
-            SearchResult::Undefined => {
-                unreachable!();
-            }
+            } // SearchResult::Undefined => {
+              //     unreachable!();
+              // }
         }
     }
 
     #[inline(never)]
     fn search(&mut self) -> SearchResult {
-
         loop {
             let propagation_result = self.propagate();
             if let PropagationResult::Conflict { variable_index, reasons } = propagation_result {
@@ -147,15 +143,19 @@ impl SATSolver {
             } else if self.variable_manager.number_of_unassigned_variables() == 0 {
                 // 未割り当ての変数がなくなれば充足可能
                 return SearchResult::Satisfiable;
-            } else if self.clause_theory.is_request_restart(self.conflict_count){
+            } else if self.clause_theory.is_request_restart(self.conflict_count) {
                 // 矛盾回数が閾値に達したらリスタート
                 if self.variable_manager.current_decision_level() != 0 {
                     self.backjump(0);
                 }
-                eprintln!("restart_count={} conflict_count={} fixed={}", self.restart_count, self.conflict_count, self.variable_manager.number_of_assigned_variables());
+                eprintln!(
+                    "restart_count={} conflict_count={} fixed={}",
+                    self.restart_count,
+                    self.conflict_count,
+                    self.variable_manager.number_of_assigned_variables()
+                );
                 self.restart_count += 1;
                 self.clause_theory.restart(&self.variable_manager, self.conflict_count);
-
             } else {
                 // 決定変数を選択
                 self.decide();
@@ -177,7 +177,7 @@ impl SATSolver {
         assert!(self.tentative_assigned_variable_queue.is_empty());
         loop {
             assert!(!self.unassigned_variable_queue.is_empty());
-            let variable_index = self.unassigned_variable_queue.pop_first().unwrap();
+            let variable_index = self.unassigned_variable_queue.pop().unwrap();
             match self.variable_manager.get_state(variable_index) {
                 VariableState::Assigned { .. } => {
                     // 伝播によって既に値が割り当てられた変数が含まれていることがあるので，それらを無視する
@@ -186,11 +186,7 @@ impl SATSolver {
                 VariableState::Unassigned { last_assigned_value } => {
                     // println!("x{}={}", variable_index, last_assigned_value);
                     // 前に割り当てられていた値を割り当て
-                    self.tentative_assigned_variable_queue.insert(
-                        variable_index,
-                        last_assigned_value,
-                        Reason::Decision,
-                    );
+                    self.tentative_assigned_variable_queue.push(variable_index, last_assigned_value, Reason::Decision);
                     break;
                 }
             }
@@ -206,7 +202,7 @@ impl SATSolver {
         self.tentative_assigned_variable_queue.clear();
         while self.variable_manager.current_decision_level() > backjump_decision_level {
             let unassigned_variable_index = self.variable_manager.unassign();
-            self.unassigned_variable_queue.insert(unassigned_variable_index);
+            self.unassigned_variable_queue.push(unassigned_variable_index);
         }
     }
 
@@ -217,18 +213,16 @@ impl SATSolver {
             if self.tentative_assigned_variable_queue.has_conflict() {
                 // 矛盾が発生していれば矛盾している変数を 1 つ選んで返す
                 let (variable_index, reasons) =
-                    self.tentative_assigned_variable_queue.iter_conflicting_variables().next().unwrap();
-                return PropagationResult::Conflict { variable_index: *variable_index, reasons: *reasons };
+                    self.tentative_assigned_variable_queue.pop_conflicting_variable().unwrap();
+                return PropagationResult::Conflict { variable_index: variable_index, reasons: reasons };
             }
             // 伝播によって仮割り当てされた変数のうち最も優先度の高いものを取り出す
             let (variable_index, value, reason) =
-                self.tentative_assigned_variable_queue.pop_first_consistent_variable().unwrap();
-            // println!("by x{}={}", variable_index, value);
-            // println!("watching_clauses={}", self.watched_infos[variable_index][value as usize].len());
+                self.tentative_assigned_variable_queue.pop_consistent_variable().unwrap();
             // 本割り当て
             self.variable_manager.assign(variable_index, value, reason);
             // 割り当てを通知
-            self.clause_theory.inform_assignment(
+            self.clause_theory.propagate(
                 &self.variable_manager,
                 variable_index,
                 &mut self.tentative_assigned_variable_queue,
@@ -243,7 +237,7 @@ impl SATSolver {
         // MEMO: このあたりはもう少しマシな設計がある気がする
         // 割り当てを説明する節を取得
         self.literal_buffer.clear();
-        self.clause_theory.explain(variable_index, value, reason, self.conflict_count,&mut self.literal_buffer);
+        self.clause_theory.explain(variable_index, value, reason, self.conflict_count, &mut self.literal_buffer);
         // 節を analyzer_buffer に融合
         for literal in self.literal_buffer.iter() {
             if self.analyzer_buffer.contains_key(literal.index) {
@@ -276,7 +270,11 @@ impl SATSolver {
     }
 
     #[inline(never)]
-    fn analyze(&mut self, conflicting_variable_index: ConstraintSize, reasons: [Reason; 2]) -> (VariableSize, Array<VariableSize, Literal>) {
+    fn analyze(
+        &mut self,
+        conflicting_variable_index: ConstraintSize,
+        reasons: [Reason; 2],
+    ) -> (VariableSize, Array<VariableSize, Literal>) {
         // println!("@analyze");
         self.analyzer_buffer.clear();
         if self.analyzer_buffer.capacity() < self.variable_manager.number_of_variables() {

@@ -1,6 +1,3 @@
-
-
-
 pub type VariableSize = u32;
 
 pub type ConstraintSize = u32;

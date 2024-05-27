@@ -1,8 +1,5 @@
-
-
-use std::{cmp::Ordering, marker::PhantomData};
 use super::{array::Array, size::Size};
-
+use std::{cmp::Ordering, marker::PhantomData};
 
 pub trait Comparator<SizeT, ValueT> {
     fn compare(lhs: &(SizeT, ValueT), rhs: &(SizeT, ValueT)) -> Ordering;
@@ -10,11 +7,26 @@ pub trait Comparator<SizeT, ValueT> {
 
 pub trait Sort<SizeT, ValueT>: Default
 where
-    SizeT: Size
+    SizeT: Size,
 {
-    fn update(&self, heap_array: &mut Array<SizeT, (SizeT, ValueT)>, position_array: &mut Array<SizeT, SizeT>, position: SizeT);
-    fn up_heap(&self, heap_array: &mut Array<SizeT, (SizeT, ValueT)>, position_array: &mut Array<SizeT, SizeT>, position: SizeT);
-    fn down_heap(&self, heap_array: &mut Array<SizeT, (SizeT, ValueT)>, position_array: &mut Array<SizeT, SizeT>, position: SizeT);
+    fn update(
+        &self,
+        heap_array: &mut Array<SizeT, (SizeT, ValueT)>,
+        position_array: &mut Array<SizeT, SizeT>,
+        position: SizeT,
+    );
+    fn up_heap(
+        &self,
+        heap_array: &mut Array<SizeT, (SizeT, ValueT)>,
+        position_array: &mut Array<SizeT, SizeT>,
+        position: SizeT,
+    );
+    fn down_heap(
+        &self,
+        heap_array: &mut Array<SizeT, (SizeT, ValueT)>,
+        position_array: &mut Array<SizeT, SizeT>,
+        position: SizeT,
+    );
 }
 
 pub struct Base<SizeT, ValueT, SortT>
@@ -71,8 +83,7 @@ where
     }
 
     #[inline(always)]
-    pub fn get(&self, index: SizeT) -> Option<&ValueT>
-    {
+    pub fn get(&self, index: SizeT) -> Option<&ValueT> {
         let p = self.position_array[index];
         if p != Self::NULL_POSITION {
             Some(&self.heap_array[p].1)
@@ -165,14 +176,32 @@ impl<SizeT, ValueT> Default for NotSort<SizeT, ValueT> {
 
 impl<SizeT, ValueT> Sort<SizeT, ValueT> for NotSort<SizeT, ValueT>
 where
-    SizeT: Size
+    SizeT: Size,
 {
     #[inline(always)]
-    fn update(&self, _heap_array: &mut Array<SizeT, (SizeT, ValueT)>, _position_array: &mut Array<SizeT, SizeT>, _position: SizeT) {}
+    fn update(
+        &self,
+        _heap_array: &mut Array<SizeT, (SizeT, ValueT)>,
+        _position_array: &mut Array<SizeT, SizeT>,
+        _position: SizeT,
+    ) {
+    }
     #[inline(always)]
-    fn up_heap(&self, _heap_array: &mut Array<SizeT, (SizeT, ValueT)>, _position_array: &mut Array<SizeT, SizeT>, _position: SizeT) {}
+    fn up_heap(
+        &self,
+        _heap_array: &mut Array<SizeT, (SizeT, ValueT)>,
+        _position_array: &mut Array<SizeT, SizeT>,
+        _position: SizeT,
+    ) {
+    }
     #[inline(always)]
-    fn down_heap(&self, _heap_array: &mut Array<SizeT, (SizeT, ValueT)>, _position_array: &mut Array<SizeT, SizeT>, _position: SizeT) {}
+    fn down_heap(
+        &self,
+        _heap_array: &mut Array<SizeT, (SizeT, ValueT)>,
+        _position_array: &mut Array<SizeT, SizeT>,
+        _position: SizeT,
+    ) {
+    }
 }
 
 pub struct CustomSort<SizeT, ValueT, ComparaT>
@@ -199,10 +228,17 @@ where
     ComparatorT: Comparator<SizeT, ValueT>,
 {
     #[inline(always)]
-    fn update(&self, heap_array: &mut Array<SizeT, (SizeT, ValueT)>, position_array: &mut Array<SizeT, SizeT>, position: SizeT) {
-        if 
-            position != SizeT::zero() && 
-            ComparatorT::compare(&heap_array[(position + SizeT::from(1).unwrap()) / SizeT::from(2).unwrap() - SizeT::from(1).unwrap()], &heap_array[position]) == Ordering::Greater
+    fn update(
+        &self,
+        heap_array: &mut Array<SizeT, (SizeT, ValueT)>,
+        position_array: &mut Array<SizeT, SizeT>,
+        position: SizeT,
+    ) {
+        if position != SizeT::zero()
+            && ComparatorT::compare(
+                &heap_array[(position + SizeT::from(1).unwrap()) / SizeT::from(2).unwrap() - SizeT::from(1).unwrap()],
+                &heap_array[position],
+            ) == Ordering::Greater
         {
             self.up_heap(heap_array, position_array, position);
         } else {
@@ -211,13 +247,20 @@ where
     }
 
     #[inline(never)]
-    fn up_heap(&self, heap_array: &mut Array<SizeT, (SizeT, ValueT)>, position_array: &mut Array<SizeT, SizeT>, position: SizeT) {
+    fn up_heap(
+        &self,
+        heap_array: &mut Array<SizeT, (SizeT, ValueT)>,
+        position_array: &mut Array<SizeT, SizeT>,
+        position: SizeT,
+    ) {
         let mut current = position;
         loop {
             if current == SizeT::zero() {
                 break;
             }
-            let parent = ((current + SizeT::from(1).unwrap()) / SizeT::from(2).unwrap() - SizeT::from(1).unwrap()).try_into().unwrap();
+            let parent = ((current + SizeT::from(1).unwrap()) / SizeT::from(2).unwrap() - SizeT::from(1).unwrap())
+                .try_into()
+                .unwrap();
             if ComparatorT::compare(&heap_array[parent], &heap_array[current]) == Ordering::Greater {
                 heap_array.swap(parent, current);
                 position_array.swap(heap_array[parent].0, heap_array[current].0);
@@ -229,7 +272,12 @@ where
     }
 
     #[inline(never)]
-    fn down_heap(&self, heap_array: &mut Array<SizeT, (SizeT, ValueT)>, position_array: &mut Array<SizeT, SizeT>, position: SizeT) {
+    fn down_heap(
+        &self,
+        heap_array: &mut Array<SizeT, (SizeT, ValueT)>,
+        position_array: &mut Array<SizeT, SizeT>,
+        position: SizeT,
+    ) {
         let mut current = position;
         loop {
             let left = (current + SizeT::from(1).unwrap()) * SizeT::from(2).unwrap() - SizeT::from(1).unwrap();
@@ -237,12 +285,13 @@ where
             if left >= heap_array.len() {
                 break;
             }
-            let smaller_child =
-                if right >= heap_array.len() || ComparatorT::compare(&heap_array[left], &heap_array[right]) == Ordering::Less {
-                    left
-                } else {
-                    right
-                };
+            let smaller_child = if right >= heap_array.len()
+                || ComparatorT::compare(&heap_array[left], &heap_array[right]) == Ordering::Less
+            {
+                left
+            } else {
+                right
+            };
             if ComparatorT::compare(&heap_array[current], &heap_array[smaller_child]) == Ordering::Greater {
                 heap_array.swap(current, smaller_child);
                 position_array.swap(heap_array[current].0, heap_array[smaller_child].0);

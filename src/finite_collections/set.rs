@@ -1,20 +1,18 @@
-
 use std::fmt::Debug;
 
-use super::size::Size;
 use super::base;
-
+use super::size::Size;
 
 pub struct Set<SizeT>
 where
-    SizeT: Size
+    SizeT: Size,
 {
     map: base::Base<SizeT, (), base::NotSort<SizeT, ()>>,
 }
 
 impl<SizeT> Default for Set<SizeT>
 where
-    SizeT: Size
+    SizeT: Size,
 {
     fn default() -> Self {
         Set { map: base::Base::default() }
@@ -23,7 +21,7 @@ where
 
 impl<SizeT> Set<SizeT>
 where
-    SizeT: Size
+    SizeT: Size,
 {
     pub fn capacity(&self) -> SizeT {
         self.map.capacity()
@@ -60,5 +58,4 @@ where
     pub fn remove(&mut self, index: SizeT) {
         self.map.remove(index);
     }
-
 }
