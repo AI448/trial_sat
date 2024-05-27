@@ -274,7 +274,7 @@ impl ClauseTheory {
         );
         self.current_lbd_average.reset();
 
-        if conflict_count > self.reduction_time_stamp + 5000 {
+        if conflict_count > self.reduction_time_stamp + 10000 {
             self.clause_reduction_count += 1;
             self.reduction_time_stamp = conflict_count;
             // 決定レベル 0 で充足されている節を削除
@@ -308,8 +308,8 @@ impl ClauseTheory {
                 let rhs = self.clause_infos[*r].activity;
                 lhs.partial_cmp(&rhs).unwrap()
             });
-            // 1/4 削除
-            for clause_index in clause_priority_order.iter().take(clause_priority_order.len() / 4) {
+            // 1/2 削除
+            for clause_index in clause_priority_order.iter().take(clause_priority_order.len() / 2) {
                 let clause = &mut self.clause_infos[*clause_index];
                 clause.is_deleted = true;
                 clause.literals.clear();
