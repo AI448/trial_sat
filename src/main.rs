@@ -24,7 +24,7 @@ fn main() {
 
     let mut solver = SATSolver::new();
     for clause in problem.clauses.iter() {
-        solver.add_clause(clause.clone());
+        solver.add_clause(clause);
     }
     let result = solver.solve();
     let summary = solver.summary();

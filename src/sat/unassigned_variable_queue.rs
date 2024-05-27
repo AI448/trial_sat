@@ -1,12 +1,13 @@
-use super::super::finite_collections::Comparator;
-use super::super::finite_collections::FiniteHeapedMap;
+
+use crate::finite_collections::{Array, FiniteHeapedMap, Comparator};
+use super::types::VariableSize;
 
 /// 未割り当て変数の優先度付きキュー
 pub struct UnassignedVariableQueue {
     time_constant: f64,
     increase_value: f64,
-    activities: Vec<f64>,
-    queue: FiniteHeapedMap<f64, UnassignedVariableComparator>,
+    activities: Array<VariableSize, f64>,
+    queue: FiniteHeapedMap<VariableSize, f64, UnassignedVariableComparator>,
 }
 
 impl UnassignedVariableQueue {
@@ -14,12 +15,12 @@ impl UnassignedVariableQueue {
         UnassignedVariableQueue {
             time_constant: time_constant,
             increase_value: 1.0,
-            activities: Vec::default(),
+            activities: Array::default(),
             queue: FiniteHeapedMap::default(),
         }
     }
 
-    pub fn capacity(&self) -> usize {
+    pub fn capacity(&self) -> VariableSize {
         assert!(self.activities.len() == self.queue.capacity());
         self.activities.len()
     }
@@ -29,23 +30,23 @@ impl UnassignedVariableQueue {
         self.activities.is_empty()
     }
 
-    pub fn reserve(&mut self, additional: usize) {
+    pub fn reserve(&mut self, additional: VariableSize) {
         self.activities.resize(self.activities.len() + additional, 0.0);
         self.queue.reserve(additional);
     }
 
-    pub fn insert(&mut self, variable_index: usize) {
+    pub fn insert(&mut self, variable_index: VariableSize) {
         self.queue.insert(variable_index, self.activities[variable_index]);
     }
 
-    pub fn pop_first(&mut self) -> Option<usize> {
+    pub fn pop_first(&mut self) -> Option<VariableSize> {
         match self.queue.pop_first() {
             Some((variable_index, ..)) => Some(variable_index),
             None => None,
         }
     }
 
-    pub fn increase_activity(&mut self, variable_index: usize) {
+    pub fn increase_activity(&mut self, variable_index: VariableSize) {
         self.activities[variable_index] += self.increase_value;
         if self.queue.contains_key(variable_index) {
             self.queue.insert(variable_index, self.activities[variable_index]);
@@ -71,9 +72,9 @@ impl UnassignedVariableQueue {
 
 pub struct UnassignedVariableComparator {}
 
-impl Comparator<f64> for UnassignedVariableComparator {
+impl Comparator<VariableSize, f64> for UnassignedVariableComparator {
     #[inline(always)]
-    fn compare(lhs: &(usize, f64), rhs: &(usize, f64)) -> std::cmp::Ordering {
+    fn compare(lhs: &(VariableSize, f64), rhs: &(VariableSize, f64)) -> std::cmp::Ordering {
         rhs.1.partial_cmp(&lhs.1).unwrap()
     }
 }

@@ -1,12 +1,14 @@
-use super::types::Literal;
+use crate::finite_collections::Array;
+use super::types::{VariableSize, ConstraintSize, Literal};
+
 
 #[derive(Default)]
 pub struct SATProblem {
-    pub clauses: Vec<Vec<Literal>>,
+    pub clauses: Array<ConstraintSize, Array<VariableSize, Literal>>,
 }
 
-fn parse_line(line: &String) -> Vec<Literal> {
-    let mut clause = vec![];
+fn parse_line(line: &String) -> Array<VariableSize, Literal> {
+    let mut clause = Array::default();
     let mut found_zero = false;
     for field in line.split_whitespace() {
         assert!(!found_zero);
@@ -15,7 +17,7 @@ fn parse_line(line: &String) -> Vec<Literal> {
             found_zero = true;
             continue;
         }
-        clause.push(Literal { sign: i > 0, index: (i.abs() - 1) as usize })
+        clause.push(Literal { sign: i > 0, index: (i.abs() - 1) as VariableSize })
     }
     assert!(found_zero);
     clause

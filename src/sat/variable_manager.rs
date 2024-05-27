@@ -1,54 +1,55 @@
-use super::types::Literal;
+use super::types::{VariableSize, ConstraintSize, Literal};
+use crate::finite_collections::Array;
 
 /// 割り当て理由
 #[derive(Clone, Copy)]
 pub enum Reason {
     Decision,
-    Propagation { clause_index: usize, pldb_upper: u64, assignment_level_at_propagated: usize },
+    Propagation { clause_index: ConstraintSize, pldb_upper: VariableSize, assignment_level_at_propagated: VariableSize },
 }
 
 /// 変数の状態
 // NOTE: 廃止するかも
 pub enum VariableState {
-    Assigned { value: bool, decision_level: usize, assignment_level: usize, reason: Reason },
+    Assigned { value: bool, decision_level: VariableSize, assignment_level: VariableSize, reason: Reason },
     Unassigned { last_assigned_value: bool },
 }
 
 /// 変数の割り当て状態を管理する
 #[derive(Default)]
 pub struct VariableManager {
-    decision_level: usize,
-    assignment_infos: Vec<AssignmentInfo>,
-    variable_infos: Vec<VariableInfo>,
+    decision_level: VariableSize,
+    assignment_infos: Array<VariableSize, AssignmentInfo>,
+    variable_infos: Array<VariableSize, VariableInfo>,
 }
 
 impl VariableManager {
     #[inline(always)]
-    pub fn number_of_variables(&self) -> usize {
+    pub fn number_of_variables(&self) -> VariableSize {
         self.variable_infos.len()
     }
 
     #[inline(always)]
-    pub fn number_of_assigned_variables(&self) -> usize {
+    pub fn number_of_assigned_variables(&self) -> VariableSize {
         self.assignment_infos.len()
     }
 
     #[inline(always)]
-    pub fn number_of_unassigned_variables(&self) -> usize {
+    pub fn number_of_unassigned_variables(&self) -> VariableSize {
         self.variable_infos.len() - self.assignment_infos.len()
     }
 
     #[inline(always)]
-    pub fn current_decision_level(&self) -> usize {
+    pub fn current_decision_level(&self) -> VariableSize {
         self.decision_level
     }
 
     #[inline(always)]
-    pub fn current_assignment_level(&self) -> usize {
+    pub fn current_assignment_level(&self) -> VariableSize {
         self.assignment_infos.len()
     }
 
-    pub fn expand(&mut self, additional: usize) {
+    pub fn expand(&mut self, additional: VariableSize) {
         self.variable_infos.resize_with(self.variable_infos.len() + additional, || VariableInfo {
             value: false,
             assignment_level: VariableInfo::NULL_ASSIGNMENT_LEVEL,
@@ -73,7 +74,7 @@ impl VariableManager {
     }
 
     #[inline(always)]
-    pub fn get_state(&self, index: usize) -> VariableState {
+    pub fn get_state(&self, index: VariableSize) -> VariableState {
         // TODO: 検討． is_* 系を実装するならこの関数は不要では？ get_assignment_info, get_last_assigned_value に分けてもいい気がする．
         let variable_info = &self.variable_infos[index];
         if variable_info.assignment_level == VariableInfo::NULL_ASSIGNMENT_LEVEL {
@@ -90,7 +91,7 @@ impl VariableManager {
     }
 
     #[inline(always)]
-    pub fn assign(&mut self, variable_index: usize, value: bool, reason: Reason) {
+    pub fn assign(&mut self, variable_index: VariableSize, value: bool, reason: Reason) {
         let variable_info = &mut self.variable_infos[variable_index];
         assert!(variable_info.assignment_level == VariableInfo::NULL_ASSIGNMENT_LEVEL);
         let assignment_level = self.assignment_infos.len() + 1;
@@ -107,7 +108,7 @@ impl VariableManager {
     }
 
     #[inline(always)]
-    pub fn unassign(&mut self) -> usize {
+    pub fn unassign(&mut self) -> VariableSize {
         assert!(!self.assignment_infos.is_empty());
         let assignment_info = self.assignment_infos.pop().unwrap();
         let variable_info = &mut self.variable_infos[assignment_info.variable_index];
@@ -122,16 +123,16 @@ impl VariableManager {
 }
 
 struct AssignmentInfo {
-    pub variable_index: usize,
-    pub decision_level: usize,
+    pub variable_index: VariableSize,
+    pub decision_level: VariableSize,
     pub reason: Reason,
 }
 
 struct VariableInfo {
     pub value: bool,
-    pub assignment_level: usize,
+    pub assignment_level: VariableSize,
 }
 
 impl VariableInfo {
-    const NULL_ASSIGNMENT_LEVEL: usize = 0usize;
+    const NULL_ASSIGNMENT_LEVEL: VariableSize = 0;
 }

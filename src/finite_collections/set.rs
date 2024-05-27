@@ -1,21 +1,35 @@
+
+use std::fmt::Debug;
+
+use super::size::Size;
 use super::base;
 
-pub struct Set {
-    map: base::Base<(), base::NotSort<()>>,
+
+pub struct Set<SizeT>
+where
+    SizeT: Size
+{
+    map: base::Base<SizeT, (), base::NotSort<SizeT, ()>>,
 }
 
-impl Default for Set {
+impl<SizeT> Default for Set<SizeT>
+where
+    SizeT: Size
+{
     fn default() -> Self {
         Set { map: base::Base::default() }
     }
 }
 
-impl Set {
-    pub fn capacity(&self) -> usize {
+impl<SizeT> Set<SizeT>
+where
+    SizeT: Size
+{
+    pub fn capacity(&self) -> SizeT {
         self.map.capacity()
     }
 
-    pub fn len(&self) -> usize {
+    pub fn len(&self) -> SizeT {
         self.map.len()
     }
 
@@ -23,15 +37,15 @@ impl Set {
         self.map.is_empty()
     }
 
-    pub fn contains_key(&self, index: usize) -> bool {
+    pub fn contains_key(&self, index: SizeT) -> bool {
         self.map.contains_key(index)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &usize> {
+    pub fn iter(&self) -> impl Iterator<Item = &SizeT> {
         self.map.iter().map(|(index, ..)| index)
     }
 
-    pub fn reserve(&mut self, additional: usize) {
+    pub fn reserve(&mut self, additional: SizeT) {
         self.map.reserve(additional);
     }
 
@@ -39,11 +53,12 @@ impl Set {
         self.map.clear();
     }
 
-    pub fn insert(&mut self, index: usize) {
+    pub fn insert(&mut self, index: SizeT) {
         self.map.insert(index, ());
     }
 
-    pub fn remove(&mut self, index: usize) {
+    pub fn remove(&mut self, index: SizeT) {
         self.map.remove(index);
     }
+
 }

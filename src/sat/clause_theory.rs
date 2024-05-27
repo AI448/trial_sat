@@ -1,9 +1,10 @@
 
+use crate::finite_collections::Array;
 use super::calculate_pseudo_lbd::CalculatePseudoLBD;
 use super::exponential_smoother::ExponentialSmootherWithRunUpPeriod;
 use super::exponential_smoother::ExponentialSmoother;
 use super::tentative_assigned_variable_queue::TentativeAssignedVariableQueue;
-use super::types::Literal;
+use super::types::{VariableSize, ConstraintSize, Literal};
 use super::variable_manager::Reason;
 use super::variable_manager::VariableManager;
 use super::variable_manager::VariableState;
@@ -11,16 +12,16 @@ use super::variable_manager::VariableState;
 
 #[derive(Clone, Copy)]
 struct WatchedBy {
-    clause_index: usize,
-    watching_position: usize,
+    clause_index: ConstraintSize,
+    watching_position: VariableSize,
     cached_another_literal: Option<Literal>,
 }
 
 struct Clause {
-    literals: Vec<Literal>,
+    literals: Array<VariableSize, Literal>,
     // TODO 節の状態は「非学習節・学習節・削除された学習節」のいずれかなので，以下は enum にした方がきれい
     is_learnt: bool,
-    plbd: u64,
+    plbd: VariableSize,
     is_deleted: bool,
     last_used_time_stamp: usize,
     activity: f64,
@@ -29,8 +30,8 @@ struct Clause {
 pub struct ClauseTheory {
     activity_time_constant: f64,
     activity_increase_value: f64,
-    watched_infos: Vec<[Vec<WatchedBy>; 2]>, // NOTE: Literal を添え字にしてアクセスできる配列を使いたい
-    clause_infos: Vec<Clause>,
+    watched_infos: Array<VariableSize, [Array<ConstraintSize, WatchedBy>; 2]>, // NOTE: Literal を添え字にしてアクセスできる配列を使いたい
+    clause_infos: Array<ConstraintSize, Clause>,
     calculate_plbd: CalculatePseudoLBD,
     lbd_average: ExponentialSmootherWithRunUpPeriod,
     current_lbd_average: ExponentialSmoother,
@@ -47,8 +48,8 @@ impl ClauseTheory {
         ClauseTheory {
             activity_time_constant: activity_time_constant,
             activity_increase_value: 1.0,
-            watched_infos: Vec::default(),
-            clause_infos: Vec::default(),
+            watched_infos: Array::default(),
+            clause_infos: Array::default(),
             calculate_plbd: CalculatePseudoLBD::default(),
             lbd_average: ExponentialSmootherWithRunUpPeriod::new(1e6, 1e6),
             current_lbd_average: ExponentialSmoother::new(1e1),
@@ -61,14 +62,14 @@ impl ClauseTheory {
         }
     }
 
-    pub fn expand(&mut self, additional: usize) {
-        self.watched_infos.resize_with(self.watched_infos.len() + additional, || [vec![], vec![]]);
+    pub fn expand(&mut self, additional: VariableSize) {
+        self.watched_infos.resize_with(self.watched_infos.len() + additional, || [Array::default(), Array::default()]);
     }
 
     pub fn add_clause(
         &mut self,
         variable_manager: &VariableManager,
-        mut literals: Vec<Literal>,
+        mut literals: Array<VariableSize, Literal>,
         is_learnt: bool,
         conflict_count: usize,
         tentative_assigned_variable_queue: &mut TentativeAssignedVariableQueue,
@@ -96,7 +97,7 @@ impl ClauseTheory {
                 );
             }
         } else {
-            plbd = if is_learnt { self.calculate_plbd.calculate(variable_manager, &literals) } else { literals.len() as u64 };
+            plbd = if is_learnt { self.calculate_plbd.calculate(variable_manager, &literals) } else { literals.len() };
 
             /* 割当の状態に応じてリテラルをソート
              * 1. 真が割り当てられている -> 未割り当て -> 偽が割り当てられているの順
@@ -117,7 +118,7 @@ impl ClauseTheory {
             // 先頭の 2 つを監視リテラルに
             for (k, literal) in literals.iter().enumerate().take(2) {
                 self.watched_infos[literal.index][1 - (literal.sign as usize)]
-                    .push(WatchedBy { clause_index: clause_index, watching_position: k, cached_another_literal: Some(literals[1 - k])});
+                    .push(WatchedBy { clause_index: clause_index, watching_position: k as VariableSize, cached_another_literal: Some(literals[1 - k as VariableSize])});
             }
 
             if variable_manager.is_false(literals[1]) {
@@ -155,14 +156,14 @@ impl ClauseTheory {
     pub fn inform_assignment(
         &mut self,
         variable_manager: &VariableManager,
-        assigned_variable_index: usize,
+        assigned_variable_index: VariableSize,
         tentative_assigned_variable_queue: &mut TentativeAssignedVariableQueue,
     ) {
         let VariableState::Assigned { value: assigned_value, .. } = variable_manager.get_state(assigned_variable_index)
         else {
             unreachable!();
         };
-        let mut k = 0usize;
+        let mut k: ConstraintSize = 0;
         // variable_index への value の割当を監視している節を走査
         'loop_watching_clause: while k < self.watched_infos[assigned_variable_index][assigned_value as usize].len() {
             self.check_count += 1;
@@ -195,7 +196,7 @@ impl ClauseTheory {
                             self.watched_infos[literal.index][!literal.sign as usize]
                                 .push(WatchedBy { clause_index: clause_index, watching_position, cached_another_literal: None });
                             // 発見したリテラルを監視位置に移動
-                            clause.literals.swap(watching_position, l);
+                            clause.literals.swap(watching_position, l as VariableSize);
                             // 次の節へ
                             continue 'loop_watching_clause;
                         }
@@ -220,7 +221,7 @@ impl ClauseTheory {
                             }
                         }
                     }
-                    pldbd_upper = pldbd_upper.min((variable_manager.current_decision_level() + 1) as u64);
+                    pldbd_upper = pldbd_upper.min(variable_manager.current_decision_level() + 1);
                     // もう一方の監視リテラルに真を割り当て
                     tentative_assigned_variable_queue.insert(
                         another_watched_literal.index,
@@ -237,7 +238,7 @@ impl ClauseTheory {
         }
     }
 
-    pub fn explain(&mut self, variable_index: usize, value: bool, reason: Reason, conflict_count: usize, clause: &mut Vec<Literal>) {
+    pub fn explain(&mut self, variable_index: VariableSize, value: bool, reason: Reason, conflict_count: usize, clause: &mut Array<VariableSize, Literal>) {
         assert!(matches!(reason, Reason::Propagation { .. }));
         let Reason::Propagation { clause_index, .. } = reason else {
             unreachable!();
@@ -318,7 +319,7 @@ impl ClauseTheory {
             for variable_index in 0..variable_manager.number_of_variables() {
                 for value in [0, 1] {
                     let list = &mut self.watched_infos[variable_index][value];
-                    let mut k: usize = 0;
+                    let mut k: ConstraintSize = 0;
                     while k < list.len() {
                         if self.clause_infos[list[k].clause_index].is_deleted {
                             list.swap_remove(k);

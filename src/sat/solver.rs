@@ -1,10 +1,10 @@
 // use std::collections::VecDeque;
 
-use crate::finite_collections;
+use crate::finite_collections::{Array, FiniteHeapedMap, Comparator};
 
 use super::clause_theory::ClauseTheory;
 use super::tentative_assigned_variable_queue::TentativeAssignedVariableQueue;
-use super::types::Literal;
+use super::types::{VariableSize, ConstraintSize, Literal};
 use super::unassigned_variable_queue::UnassignedVariableQueue;
 use super::variable_manager::Reason;
 use super::variable_manager::VariableManager;
@@ -18,11 +18,11 @@ enum SearchResult {
 
 enum PropagationResult {
     Consistent,
-    Conflict { variable_index: usize, reasons: [Reason; 2] },
+    Conflict { variable_index: VariableSize, reasons: [Reason; 2] },
 }
 
 pub enum SATSolverResult {
-    Satisfiable { solution: Vec<bool> },
+    Satisfiable { solution: Array<VariableSize, bool> },
     Unsatisfiable,
 }
 
@@ -32,8 +32,8 @@ pub struct SATSolver {
     unassigned_variable_queue: UnassignedVariableQueue,
     clause_theory: ClauseTheory,
     // TODO これが必要になるなら analyze も別の構造体とした方がよいか
-    literal_buffer: Vec<Literal>,
-    analyzer_buffer: finite_collections::FiniteHeapedMap<AnalyzerBufferValue, AnalyzerBufferComparator>,
+    literal_buffer: Array<VariableSize, Literal>,
+    analyzer_buffer: FiniteHeapedMap<VariableSize, AnalyzerBufferValue, AnalyzerBufferComparator>,
     conflict_count: usize,
     restart_count: usize,
 }
@@ -46,15 +46,15 @@ impl SATSolver {
             tentative_assigned_variable_queue: TentativeAssignedVariableQueue::default(),
             unassigned_variable_queue: UnassignedVariableQueue::new(1e4),
             clause_theory: ClauseTheory::new(1e3),
-            literal_buffer: Vec::default(),
-            analyzer_buffer: finite_collections::FiniteHeapedMap::default(),
+            literal_buffer: Array::default(),
+            analyzer_buffer: FiniteHeapedMap::default(),
             conflict_count: 0usize,
             restart_count: 0usize,
         }
     }
 
     #[inline(never)]
-    pub fn expand_variables(&mut self, additional: usize) {
+    pub fn expand_variables(&mut self, additional: VariableSize) {
         if additional == 0 {
             return;
         }
@@ -72,7 +72,7 @@ impl SATSolver {
     }
 
     #[inline(never)]
-    pub fn add_clause(&mut self, literals: Vec<Literal>) {
+    pub fn add_clause(&mut self, literals: &Array<VariableSize, Literal>) {
         // println!("@add_clause");
         // 必要に応じて変数の次元を拡張
         let required_variable_dimension = literals.iter().map(|l| l.index + 1).max().unwrap_or(0);
@@ -82,7 +82,7 @@ impl SATSolver {
 
         self.clause_theory.add_clause(
             &self.variable_manager,
-            literals,
+            literals.clone(),
             false,
             self.conflict_count,
             &mut self.tentative_assigned_variable_queue,
@@ -94,7 +94,7 @@ impl SATSolver {
         let search_result = self.search();
         match search_result {
             SearchResult::Satisfiable => {
-                let mut solution = Vec::default();
+                let mut solution = Array::default();
                 for variable_index in 0..self.variable_manager.number_of_variables() {
                     if let VariableState::Assigned { value, .. } = self.variable_manager.get_state(variable_index) {
                         solution.push(value);
@@ -199,7 +199,7 @@ impl SATSolver {
     }
 
     #[inline(never)]
-    fn backjump(&mut self, backjump_decision_level: usize) {
+    fn backjump(&mut self, backjump_decision_level: VariableSize) {
         // println!("@backjump");
         // println!("{} to {}", self.variable_manager.current_decision_level(), backjump_decision_level);
         assert!(backjump_decision_level < self.variable_manager.current_decision_level());
@@ -239,7 +239,7 @@ impl SATSolver {
     }
 
     #[inline(never)]
-    fn resolve(&mut self, variable_index: usize, value: bool, reason: Reason) {
+    fn resolve(&mut self, variable_index: VariableSize, value: bool, reason: Reason) {
         // MEMO: このあたりはもう少しマシな設計がある気がする
         // 割り当てを説明する節を取得
         self.literal_buffer.clear();
@@ -276,7 +276,7 @@ impl SATSolver {
     }
 
     #[inline(never)]
-    fn analyze(&mut self, conflicting_variable_index: usize, reasons: [Reason; 2]) -> (usize, Vec<Literal>) {
+    fn analyze(&mut self, conflicting_variable_index: ConstraintSize, reasons: [Reason; 2]) -> (VariableSize, Array<VariableSize, Literal>) {
         // println!("@analyze");
         self.analyzer_buffer.clear();
         if self.analyzer_buffer.len() < self.variable_manager.number_of_variables() {
@@ -292,12 +292,13 @@ impl SATSolver {
         loop {
             if self.analyzer_buffer.len() == 0 {
                 // 節融合の結果が空になった場合には空の学習節を返す(Unsatisifiable)
-                return (0, vec![]);
+                return (0, Array::default());
             }
             {
                 // バックジャンプ可能かを判定
                 // 二分ヒープの先頭 3 つの decision_level を取得
                 // NOTE: 二分ヒープなので，最大要素と 2 番目に大きい要素を使用するなら，最初の 3 要素だけを見れば十分．
+                // TODO: 毎回メモリアロケーションが発生しているのが気になる
                 let first_three_decision_levels =
                     Vec::from_iter(self.analyzer_buffer.iter().take(3).map(|item| item.1.decision_level));
                 assert!(first_three_decision_levels.len() >= 1);
@@ -307,7 +308,8 @@ impl SATSolver {
                 let second_largest_decision_level = first_three_decision_levels[1..].iter().max().unwrap_or(&0);
                 if *second_largest_decision_level < self.variable_manager.current_decision_level() {
                     // 2 番目に大きい決定レベルが現在の決定レベル未満であればバックジャンプ可能なので，現在の節を学習節として返す
-                    let mut learnt_clause = Vec::with_capacity(self.analyzer_buffer.len());
+                    let mut learnt_clause = Array::default();
+                    learnt_clause.reserve(self.analyzer_buffer.len());
                     for (variable_index, buffer_value) in self.analyzer_buffer.iter() {
                         learnt_clause.push(Literal { index: *variable_index, sign: buffer_value.sign });
                     }
@@ -332,16 +334,16 @@ impl SATSolver {
 
 struct AnalyzerBufferValue {
     sign: bool,
-    decision_level: usize,
-    assignment_level: usize,
+    decision_level: VariableSize,
+    assignment_level: VariableSize,
     reason: Reason,
 }
 
 struct AnalyzerBufferComparator {}
 
-impl finite_collections::Comparator<AnalyzerBufferValue> for AnalyzerBufferComparator {
+impl Comparator<VariableSize, AnalyzerBufferValue> for AnalyzerBufferComparator {
     #[inline(always)]
-    fn compare(lhs: &(usize, AnalyzerBufferValue), rhs: &(usize, AnalyzerBufferValue)) -> std::cmp::Ordering {
+    fn compare(lhs: &(u32, AnalyzerBufferValue), rhs: &(u32, AnalyzerBufferValue)) -> std::cmp::Ordering {
         rhs.1.assignment_level.cmp(&lhs.1.assignment_level)
     }
 }
