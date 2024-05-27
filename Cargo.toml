@@ -4,3 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+num = "0.4.3"
+
+[profile.dev]
+opt-level = 3
+
+[profile.release]
+lto = true
+panic = "abort"
