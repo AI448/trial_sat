@@ -279,8 +279,8 @@ impl SATSolver {
     fn analyze(&mut self, conflicting_variable_index: ConstraintSize, reasons: [Reason; 2]) -> (VariableSize, Array<VariableSize, Literal>) {
         // println!("@analyze");
         self.analyzer_buffer.clear();
-        if self.analyzer_buffer.len() < self.variable_manager.number_of_variables() {
-            self.analyzer_buffer.reserve(self.variable_manager.number_of_variables() - self.analyzer_buffer.len());
+        if self.analyzer_buffer.capacity() < self.variable_manager.number_of_variables() {
+            self.analyzer_buffer.reserve(self.variable_manager.number_of_variables() - self.analyzer_buffer.capacity());
         }
         // 矛盾が生じている変数のアクティビティを増大
         self.unassigned_variable_queue.increase_activity(conflicting_variable_index);
