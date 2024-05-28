@@ -1,3 +1,4 @@
+mod analyze;
 mod calculate_lbd;
 mod clause_theory;
 mod exponential_smoother;

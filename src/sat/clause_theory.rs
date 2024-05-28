@@ -19,7 +19,7 @@ struct Clause {
     is_learnt: bool,
     lbd: VariableSize,
     is_deleted: bool,
-    last_used_time_stamp: usize,
+    last_used_time: usize,
     activity: f64,
 }
 
@@ -29,9 +29,10 @@ pub struct ClauseTheory {
     watched_infos: Array<VariableSize, [Array<ConstraintSize, WatchedBy>; 2]>, // NOTE: Literal を添え字にしてアクセスできる配列を使いたい
     clause_infos: Array<ConstraintSize, Clause>,
     calculate_lbd: CalculateLBD,
+    time: usize,
     lbd_average: ExponentialSmootherWithRunUpPeriod,
     current_lbd_average: ExponentialSmoother,
-    reduction_time_stamp: usize,
+    last_reduction_time: usize,
     check_count: usize,
     skip_by_cached_count: usize,
     skip_by_another_count: usize,
@@ -47,9 +48,10 @@ impl ClauseTheory {
             watched_infos: Array::default(),
             clause_infos: Array::default(),
             calculate_lbd: CalculateLBD::default(),
+            time: 0,
             lbd_average: ExponentialSmootherWithRunUpPeriod::new(1e6, 1e6),
             current_lbd_average: ExponentialSmoother::new(1e1),
-            reduction_time_stamp: 0,
+            last_reduction_time: 0,
             check_count: 0,
             skip_by_cached_count: 0,
             skip_by_another_count: 0,
@@ -146,7 +148,7 @@ impl ClauseTheory {
             is_learnt: is_learnt,
             lbd: lbd,
             is_deleted: false,
-            last_used_time_stamp: conflict_count,
+            last_used_time: conflict_count,
             activity: self.activity_increase_value,
         });
     }
@@ -247,7 +249,6 @@ impl ClauseTheory {
         variable_index: VariableSize,
         value: bool,
         reason: Reason,
-        conflict_count: usize,
         clause: &mut Array<VariableSize, Literal>,
         inclease: bool, // TODO: アクティビティ増大の指定方法がダサいのでなにか考える
     ) {
@@ -256,7 +257,7 @@ impl ClauseTheory {
             unreachable!();
         };
         assert!(self.clause_infos[clause_index].literals.iter().any(|l| l.index == variable_index && l.sign == value));
-        self.clause_infos[clause_index].last_used_time_stamp = conflict_count;
+        self.clause_infos[clause_index].last_used_time = self.time;
         if inclease {
             self.clause_infos[clause_index].activity += self.activity_increase_value;
         }
@@ -264,6 +265,7 @@ impl ClauseTheory {
     }
 
     pub fn advance_time(&mut self) {
+        self.time += 1;
         self.activity_increase_value /= 1.0 - 1.0 / self.activity_time_constant;
         if self.activity_increase_value > 1e4 {
             for clause in self.clause_infos.iter_mut() {
@@ -275,18 +277,18 @@ impl ClauseTheory {
         }
     }
 
-    pub fn is_request_restart(&self, conflict_count: usize) -> bool {
-        self.current_lbd_average.get() > self.lbd_average.get() || conflict_count > self.reduction_time_stamp + 20000
+    pub fn is_request_restart(&self) -> bool {
+        self.current_lbd_average.get() > self.lbd_average.get() || self.time > self.last_reduction_time + 20000
     }
 
-    pub fn restart(&mut self, variable_manager: &VariableManager, conflict_count: usize) {
+    pub fn restart(&mut self, variable_manager: &VariableManager) {
         assert!(variable_manager.current_decision_level() == 0);
         eprintln!("pldb_average={} current_pldb_average={}", self.lbd_average.get(), self.current_lbd_average.get());
         self.current_lbd_average.reset();
 
-        if conflict_count > self.reduction_time_stamp + 10000 {
+        if self.time > self.last_reduction_time + 10000 {
             self.clause_reduction_count += 1;
-            self.reduction_time_stamp = conflict_count;
+            self.last_reduction_time = self.time;
             // 決定レベル 0 で充足されている節を削除
             for clause in self.clause_infos.iter_mut().filter(|c| !c.is_deleted) {
                 let satisfied = clause.literals.iter().any(|l| variable_manager.is_true(*l));
@@ -313,8 +315,7 @@ impl ClauseTheory {
                     self.clause_infos[*i].is_learnt
                         && !self.clause_infos[*i].is_deleted
                         && self.clause_infos[*i].lbd >= 3
-                        && (self.clause_infos[*i].lbd >= 6
-                            || self.clause_infos[*i].last_used_time_stamp + 20000 < conflict_count)
+                        && (self.clause_infos[*i].lbd >= 6 || self.clause_infos[*i].last_used_time + 20000 < self.time)
                 }, /* && self.clause_infos[*i].last_used_time_stamp + 30000 < conflict_count*/
             ));
             // 削除の優先度の高い順にソート
