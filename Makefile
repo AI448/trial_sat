@@ -1,12 +1,21 @@
-.PHONY: target/release/trial_sat target/debug/trial_sat test
+DEV_BINARY=target/debug/trial_sat
+RELEASE_BINARY=target/release/trial_sat
 
-all: target/release/trial_sat target/debug/trial_sat
+.PHONY: format test clean $(DEV_BINARY) $(RELEASE_BINARY)
 
-target/release/trial_sat:
-	cargo build --release
+all: $(DEV_BINARY) $(RELEASE_BINARY)
 
-target/debug/trial_sat:
-	cargo build
+format:
+	cargo fmt
+
+$(DEV_BINARY):
+	cargo build --profile=dev
+
+$(RELEASE_BINARY):
+	cargo build --profile=release
 
 test: target/release/trial_sat
 	cd tests && python solve_all_instances.py
+
+clean:
+	cargo clean
