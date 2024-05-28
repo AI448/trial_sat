@@ -237,7 +237,7 @@ impl SATSolver {
         // MEMO: このあたりはもう少しマシな設計がある気がする
         // 割り当てを説明する節を取得
         self.literal_buffer.clear();
-        self.clause_theory.explain(variable_index, value, reason, self.conflict_count, &mut self.literal_buffer);
+        self.clause_theory.explain(variable_index, value, reason, self.conflict_count, &mut self.literal_buffer, true);
         // 節を analyzer_buffer に融合
         for literal in self.literal_buffer.iter() {
             if self.analyzer_buffer.contains_key(literal.index) {
@@ -250,14 +250,16 @@ impl SATSolver {
             } else {
                 // リテラルが含まれていない場合
                 // リテラルが割り当て済みかつ割り当てレベルが非零ならそのリテラルを追加
-                if let VariableState::Assigned { decision_level, assignment_level, reason, .. } =
+                if let VariableState::Assigned { value, decision_level, assignment_level, reason } =
                     self.variable_manager.get_state(literal.index)
                 {
+                    debug_assert!(value == !literal.sign); // 偽が割り当てられているはず
                     if decision_level != 0 {
                         self.analyzer_buffer.insert(
                             literal.index,
                             AnalyzerBufferValue {
                                 sign: literal.sign,
+                                value: value,
                                 decision_level: decision_level,
                                 assignment_level: assignment_level,
                                 reason: reason,
@@ -311,6 +313,8 @@ impl SATSolver {
                     for (variable_index, buffer_value) in self.analyzer_buffer.iter() {
                         learnt_clause.push(Literal { index: *variable_index, sign: buffer_value.sign });
                     }
+                    // simplify
+                    self.simplify(&mut learnt_clause);
                     // 学習節に含まれる変数のアクティビティを増大
                     for literal in learnt_clause.iter() {
                         self.unassigned_variable_queue.increase_activity(literal.index);
@@ -328,10 +332,67 @@ impl SATSolver {
             self.resolve(variable_index, value, reason);
         }
     }
+
+    fn simplify(&mut self, literals: &mut Array<VariableSize, Literal>) {
+        let n = literals.len();
+        // 割当済みの変数を analyzer_buffer に移動(決定レベル 0 で割当済みであれば単に削除)
+        self.analyzer_buffer.clear();
+        let mut k: VariableSize = 1;
+        while k < literals.len() {
+            let literal = literals[k];
+            if let VariableState::Assigned { value, decision_level, assignment_level, reason, .. } =
+                self.variable_manager.get_state(literal.index)
+            {
+                if decision_level != 0 {
+                    self.analyzer_buffer.insert(
+                        literal.index,
+                        AnalyzerBufferValue { sign: literal.sign, value, decision_level, assignment_level, reason },
+                    );
+                }
+                literals.swap_remove(k);
+            } else {
+                k += 1;
+            }
+        }
+        //
+        while !self.analyzer_buffer.is_empty() {
+            let (variable_index, heap_item) = self.analyzer_buffer.pop_first().unwrap();
+            if let Reason::Propagation { .. } = heap_item.reason {
+                self.literal_buffer.clear();
+                // TODO: 確認 制約のアクティビティが加算されてしまうが大丈夫か
+                self.clause_theory.explain(
+                    variable_index,
+                    heap_item.value,
+                    heap_item.reason,
+                    self.conflict_count,
+                    &mut self.literal_buffer,
+                    false,
+                );
+                //
+                let is_erasable = self.literal_buffer.iter().all(|l| {
+                    if l.index == variable_index {
+                        debug_assert!(l.sign == heap_item.value);
+                        true
+                    } else {
+                        self.analyzer_buffer.get(l.index).is_some_and(|v| v.sign == l.sign)
+                    }
+                });
+                if !is_erasable {
+                    literals.push(Literal { index: variable_index, sign: heap_item.sign });
+                }
+            } else {
+                literals.push(Literal { index: variable_index, sign: heap_item.sign });
+            }
+        }
+        if literals.len() < n {
+            // eprintln!("simpify {} -> {}", n, literals.len());
+        }
+    }
 }
 
 struct AnalyzerBufferValue {
     sign: bool,
+    value: bool,
     decision_level: VariableSize,
     assignment_level: VariableSize,
     reason: Reason,

@@ -47,8 +47,8 @@ impl ClauseTheory {
             watched_infos: Array::default(),
             clause_infos: Array::default(),
             calculate_lbd: CalculateLBD::default(),
-            lbd_average: ExponentialSmootherWithRunUpPeriod::new(1e5, 1e5),
-            current_lbd_average: ExponentialSmoother::new(1e2),
+            lbd_average: ExponentialSmootherWithRunUpPeriod::new(1e6, 1e6),
+            current_lbd_average: ExponentialSmoother::new(1e1),
             reduction_time_stamp: 0,
             check_count: 0,
             skip_by_cached_count: 0,
@@ -75,7 +75,6 @@ impl ClauseTheory {
         let clause_index = self.clause_infos.len();
 
         let lbd;
-
         if literals.len() == 0 {
             assert!(false); // TODO: あとで対応(上の all での判定で除かれるはず)
             lbd = 0;
@@ -214,17 +213,19 @@ impl ClauseTheory {
                         clause.lbd = lbd;
                     }
                     //
-                    // let mut pldbd_upper = lbd;
+                    // let mut ldbd_upper = lbd;
                     // for literal in clause.literals.iter() {
-                    //     if let VariableState::Assigned {decision_level, reason , ..} = variable_manager.get_state(literal.index) {
+                    //     if let VariableState::Assigned { decision_level, reason, .. } =
+                    //         variable_manager.get_state(literal.index)
+                    //     {
                     //         if decision_level == variable_manager.current_decision_level() {
-                    //             if let Reason::Propagation { lbd: u, ..} = reason {
-                    //                 pldbd_upper += u - 1;
+                    //             if let Reason::Propagation { lbd: u, .. } = reason {
+                    //                 ldbd_upper += u - 1;
                     //             }
                     //         }
                     //     }
                     // }
-                    // pldbd_upper = pldbd_upper.min(variable_manager.current_decision_level() + 1);
+                    // ldbd_upper = ldbd_upper.min(variable_manager.current_decision_level());
                     // もう一方の監視リテラルに真を割り当て
                     tentative_assigned_variable_queue.push(
                         another_watched_literal.index,
@@ -248,6 +249,7 @@ impl ClauseTheory {
         reason: Reason,
         conflict_count: usize,
         clause: &mut Array<VariableSize, Literal>,
+        inclease: bool, // TODO: アクティビティ増大の指定方法がダサいのでなにか考える
     ) {
         assert!(matches!(reason, Reason::Propagation { .. }));
         let Reason::Propagation { clause_index, .. } = reason else {
@@ -255,7 +257,9 @@ impl ClauseTheory {
         };
         assert!(self.clause_infos[clause_index].literals.iter().any(|l| l.index == variable_index && l.sign == value));
         self.clause_infos[clause_index].last_used_time_stamp = conflict_count;
-        self.clause_infos[clause_index].activity += self.activity_increase_value;
+        if inclease {
+            self.clause_infos[clause_index].activity += self.activity_increase_value;
+        }
         clause.clone_from(&self.clause_infos[clause_index].literals);
     }
 

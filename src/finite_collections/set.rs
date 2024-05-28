@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 use super::base;
 use super::size::Size;
 
