@@ -1,13 +1,14 @@
 use crate::finite_collections::{Array, Comparator, FiniteHeapedMap};
 
 use super::clause_theory::ClauseTheory;
+use super::simplify::Simplify;
 use super::types::{ConstraintSize, Literal, VariableSize};
 use super::unassigned_variable_queue::UnassignedVariableQueue;
 use super::variable_manager::{Reason, VariableManager, VariableState};
 
 struct AnalyzerBufferValue {
+    // TODO 検討 豪華すぎるので削減してもいいかも
     sign: bool,
-    value: bool,
     decision_level: VariableSize,
     assignment_level: VariableSize,
     reason: Reason,
@@ -24,7 +25,8 @@ impl Comparator<VariableSize, AnalyzerBufferValue> for AnalyzerBufferComparator 
 
 #[derive(Default)]
 pub struct Analyze {
-    literal_buffer: Array<VariableSize, Literal>,
+    simplify: Simplify,
+    literals: Array<VariableSize, Literal>,
     analyzer_buffer: FiniteHeapedMap<VariableSize, AnalyzerBufferValue, AnalyzerBufferComparator>,
 }
 
@@ -42,10 +44,10 @@ impl Analyze {
         if self.analyzer_buffer.capacity() < variables.number_of_variables() {
             self.analyzer_buffer.reserve(variables.number_of_variables() - self.analyzer_buffer.capacity());
         }
-        // 矛盾が生じている変数のアクティビティを増大
-        unassigned_variable_queue.increase_activity(conflicting_variable_index);
         // 矛盾している 2 つの節を融合
         for (reason, value) in reasons.iter().zip([false, true]) {
+            // 矛盾が生じている変数のアクティビティを増大
+            unassigned_variable_queue.increase_activity(conflicting_variable_index);
             self.resolve(variables, theory, conflicting_variable_index, value, *reason);
         }
         // バックジャンプ可能な節が獲られるまで融合を繰り返す
@@ -74,7 +76,7 @@ impl Analyze {
                         learnt_clause.push(Literal { index: *variable_index, sign: buffer_value.sign });
                     }
                     // simplify
-                    self.simplify(variables, theory, &mut learnt_clause);
+                    self.simplify.simplify(variables, theory, &mut learnt_clause);
                     // 学習節に含まれる変数のアクティビティを増大
                     for literal in learnt_clause.iter() {
                         unassigned_variable_queue.increase_activity(literal.index);
@@ -103,10 +105,10 @@ impl Analyze {
         reason: Reason,
     ) {
         // 割り当てを説明する節を取得
-        self.literal_buffer.clear();
-        theory.explain(variable_index, value, reason, &mut self.literal_buffer, true);
+        self.literals.clear();
+        theory.explain(variable_index, value, reason, &mut self.literals);
         // 節を analyzer_buffer に融合
-        for literal in self.literal_buffer.iter() {
+        for literal in self.literals.iter() {
             if self.analyzer_buffer.contains_key(literal.index) {
                 if self.analyzer_buffer.get(literal.index).unwrap().sign == !literal.sign {
                     // 逆符号のリテラルが含まれていればそれを削除
@@ -126,7 +128,6 @@ impl Analyze {
                             literal.index,
                             AnalyzerBufferValue {
                                 sign: literal.sign,
-                                value: value,
                                 decision_level: decision_level,
                                 assignment_level: assignment_level,
                                 reason: reason,
@@ -135,60 +136,6 @@ impl Analyze {
                     }
                 }
             }
-        }
-    }
-
-    fn simplify(
-        &mut self,
-        variables: &VariableManager,
-        theory: &mut ClauseTheory,
-        literals: &mut Array<VariableSize, Literal>,
-    ) {
-        let n = literals.len();
-        // 割当済みの変数を analyzer_buffer に移動(決定レベル 0 で割当済みであれば単に削除)
-        self.analyzer_buffer.clear();
-        let mut k: VariableSize = 1;
-        while k < literals.len() {
-            let literal = literals[k];
-            if let VariableState::Assigned { value, decision_level, assignment_level, reason, .. } =
-                variables.get_state(literal.index)
-            {
-                if decision_level != 0 {
-                    self.analyzer_buffer.insert(
-                        literal.index,
-                        AnalyzerBufferValue { sign: literal.sign, value, decision_level, assignment_level, reason },
-                    );
-                }
-                literals.swap_remove(k);
-            } else {
-                k += 1;
-            }
-        }
-        //
-        while !self.analyzer_buffer.is_empty() {
-            let (variable_index, heap_item) = self.analyzer_buffer.pop_first().unwrap();
-            if let Reason::Propagation { .. } = heap_item.reason {
-                self.literal_buffer.clear();
-                // TODO: 確認 制約のアクティビティが加算されてしまうが大丈夫か
-                theory.explain(variable_index, heap_item.value, heap_item.reason, &mut self.literal_buffer, false);
-                //
-                let is_erasable = self.literal_buffer.iter().all(|l| {
-                    if l.index == variable_index {
-                        debug_assert!(l.sign == heap_item.value);
-                        true
-                    } else {
-                        self.analyzer_buffer.get(l.index).is_some_and(|v| v.sign == l.sign)
-                    }
-                });
-                if !is_erasable {
-                    literals.push(Literal { index: variable_index, sign: heap_item.sign });
-                }
-            } else {
-                literals.push(Literal { index: variable_index, sign: heap_item.sign });
-            }
-        }
-        if literals.len() < n {
-            // eprintln!("simpify {} -> {}", n, literals.len());
         }
     }
 }

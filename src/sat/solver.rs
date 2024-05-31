@@ -1,11 +1,11 @@
 // use std::collections::VecDeque;
 
-use crate::finite_collections::{Array, Comparator, FiniteHeapedMap};
+use crate::finite_collections::Array;
 
 use super::analyze::Analyze;
 use super::clause_theory::ClauseTheory;
 use super::tentative_assigned_variable_queue::TentativeAssignedVariableQueue;
-use super::types::{ConstraintSize, Literal, VariableSize};
+use super::types::{Literal, VariableSize};
 use super::unassigned_variable_queue::UnassignedVariableQueue;
 use super::variable_manager::{Reason, VariableManager, VariableState};
 
@@ -41,8 +41,8 @@ impl SATSolver {
         SATSolver {
             variable_manager: VariableManager::default(),
             tentative_assigned_variable_queue: TentativeAssignedVariableQueue::default(),
-            unassigned_variable_queue: UnassignedVariableQueue::new(1e4),
-            clause_theory: ClauseTheory::new(1e3),
+            unassigned_variable_queue: UnassignedVariableQueue::new(20.0),
+            clause_theory: ClauseTheory::new(1e4),
             analyze: Analyze::default(),
             conflict_count: 0usize,
             restart_count: 0usize,
@@ -80,7 +80,6 @@ impl SATSolver {
             &self.variable_manager,
             literals.clone(),
             false,
-            self.conflict_count,
             &mut self.tentative_assigned_variable_queue,
         );
     }
@@ -138,7 +137,6 @@ impl SATSolver {
                     &self.variable_manager,
                     learnt_clause,
                     true,
-                    self.conflict_count,
                     &mut self.tentative_assigned_variable_queue,
                 );
                 // 時刻を 1 つ進める(内部でアクティビティの指数平滑化を行っているため)
@@ -218,6 +216,11 @@ impl SATSolver {
                 // 矛盾が発生していれば矛盾している変数を 1 つ選んで返す
                 let (variable_index, reasons) =
                     self.tentative_assigned_variable_queue.pop_conflicting_variable().unwrap();
+                for reason in reasons.iter() {
+                    if let Reason::Propagation { clause_index, .. } = *reason {
+                        self.clause_theory.increase_activity(clause_index);
+                    }
+                }
                 return PropagationResult::Conflict { variable_index: variable_index, reasons: reasons };
             }
             // 伝播によって仮割り当てされた変数のうち最も優先度の高いものを取り出す
@@ -225,6 +228,10 @@ impl SATSolver {
                 self.tentative_assigned_variable_queue.pop_consistent_variable().unwrap();
             // 本割り当て
             self.variable_manager.assign(variable_index, value, reason);
+            //
+            if let Reason::Propagation { clause_index, .. } = reason {
+                self.clause_theory.increase_activity(clause_index);
+            }
             // 割り当てを通知
             self.clause_theory.propagate(
                 &self.variable_manager,
@@ -235,181 +242,4 @@ impl SATSolver {
 
         PropagationResult::Consistent
     }
-    /*
-        #[inline(never)]
-        fn resolve(&mut self, variable_index: VariableSize, value: bool, reason: Reason) {
-            // MEMO: このあたりはもう少しマシな設計がある気がする
-            // 割り当てを説明する節を取得
-            self.literal_buffer.clear();
-            self.clause_theory.explain(variable_index, value, reason, self.conflict_count, &mut self.literal_buffer, true);
-            // 節を analyzer_buffer に融合
-            for literal in self.literal_buffer.iter() {
-                if self.analyzer_buffer.contains_key(literal.index) {
-                    if self.analyzer_buffer.get(literal.index).unwrap().sign == !literal.sign {
-                        // 逆符号のリテラルが含まれていればそれを削除
-                        self.analyzer_buffer.remove(literal.index);
-                    } else {
-                        // 同符号のリテラルが含まれていれば何もしない
-                    }
-                } else {
-                    // リテラルが含まれていない場合
-                    // リテラルが割り当て済みかつ割り当てレベルが非零ならそのリテラルを追加
-                    if let VariableState::Assigned { value, decision_level, assignment_level, reason } =
-                        self.variable_manager.get_state(literal.index)
-                    {
-                        debug_assert!(value == !literal.sign); // 偽が割り当てられているはず
-                        if decision_level != 0 {
-                            self.analyzer_buffer.insert(
-                                literal.index,
-                                AnalyzerBufferValue {
-                                    sign: literal.sign,
-                                    value: value,
-                                    decision_level: decision_level,
-                                    assignment_level: assignment_level,
-                                    reason: reason,
-                                },
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        #[inline(never)]
-        fn analyze(
-            &mut self,
-            conflicting_variable_index: ConstraintSize,
-            reasons: [Reason; 2],
-        ) -> (VariableSize, Array<VariableSize, Literal>) {
-            // println!("@analyze");
-            self.analyzer_buffer.clear();
-            if self.analyzer_buffer.capacity() < self.variable_manager.number_of_variables() {
-                self.analyzer_buffer.reserve(self.variable_manager.number_of_variables() - self.analyzer_buffer.capacity());
-            }
-            // 矛盾が生じている変数のアクティビティを増大
-            self.unassigned_variable_queue.increase_activity(conflicting_variable_index);
-            // 矛盾している 2 つの節を融合
-            for (reason, value) in reasons.iter().zip([false, true]) {
-                self.resolve(conflicting_variable_index, value, *reason);
-            }
-            // バックジャンプ可能な節が獲られるまで融合を繰り返す
-            loop {
-                if self.analyzer_buffer.len() == 0 {
-                    // 節融合の結果が空になった場合には空の学習節を返す(Unsatisifiable)
-                    return (0, Array::default());
-                }
-                {
-                    // バックジャンプ可能かを判定
-                    // 二分ヒープの先頭 3 つの decision_level を取得
-                    // NOTE: 二分ヒープなので，最大要素と 2 番目に大きい要素を使用するなら，最初の 3 要素だけを見れば十分．
-                    // TODO: 毎回メモリアロケーションが発生しているのが気になる
-                    let first_three_decision_levels =
-                        Vec::from_iter(self.analyzer_buffer.iter().take(3).map(|item| item.1.decision_level));
-                    assert!(first_three_decision_levels.len() >= 1);
-                    // 最も大きい決定レベルは現在の決定レベルと同じであるはず
-                    assert!(first_three_decision_levels[0] == self.variable_manager.current_decision_level());
-                    // 2 番目に大きい決定レベルを取得
-                    let second_largest_decision_level = first_three_decision_levels[1..].iter().max().unwrap_or(&0);
-                    if *second_largest_decision_level < self.variable_manager.current_decision_level() {
-                        // 2 番目に大きい決定レベルが現在の決定レベル未満であればバックジャンプ可能なので，現在の節を学習節として返す
-                        let mut learnt_clause = Array::default();
-                        learnt_clause.reserve(self.analyzer_buffer.len());
-                        for (variable_index, buffer_value) in self.analyzer_buffer.iter() {
-                            learnt_clause.push(Literal { index: *variable_index, sign: buffer_value.sign });
-                        }
-                        // simplify
-                        self.simplify(&mut learnt_clause);
-                        // 学習節に含まれる変数のアクティビティを増大
-                        for literal in learnt_clause.iter() {
-                            self.unassigned_variable_queue.increase_activity(literal.index);
-                        }
-                        return (*second_largest_decision_level, learnt_clause);
-                    }
-                }
-                // 最大割り当てレベル(節融合による消去対象)の変数を選択
-                let variable_index = self.analyzer_buffer.first_key_value().unwrap().0;
-                let value = !self.analyzer_buffer.first_key_value().unwrap().1.sign;
-                let reason = self.analyzer_buffer.first_key_value().unwrap().1.reason;
-                // 消去対象の変数のアクティビティを増大
-                self.unassigned_variable_queue.increase_activity(variable_index);
-                // 節融合
-                self.resolve(variable_index, value, reason);
-            }
-        }
-
-        fn simplify(&mut self, literals: &mut Array<VariableSize, Literal>) {
-            let n = literals.len();
-            // 割当済みの変数を analyzer_buffer に移動(決定レベル 0 で割当済みであれば単に削除)
-            self.analyzer_buffer.clear();
-            let mut k: VariableSize = 1;
-            while k < literals.len() {
-                let literal = literals[k];
-                if let VariableState::Assigned { value, decision_level, assignment_level, reason, .. } =
-                    self.variable_manager.get_state(literal.index)
-                {
-                    if decision_level != 0 {
-                        self.analyzer_buffer.insert(
-                            literal.index,
-                            AnalyzerBufferValue { sign: literal.sign, value, decision_level, assignment_level, reason },
-                        );
-                    }
-                    literals.swap_remove(k);
-                } else {
-                    k += 1;
-                }
-            }
-            //
-            while !self.analyzer_buffer.is_empty() {
-                let (variable_index, heap_item) = self.analyzer_buffer.pop_first().unwrap();
-                if let Reason::Propagation { .. } = heap_item.reason {
-                    self.literal_buffer.clear();
-                    // TODO: 確認 制約のアクティビティが加算されてしまうが大丈夫か
-                    self.clause_theory.explain(
-                        variable_index,
-                        heap_item.value,
-                        heap_item.reason,
-                        self.conflict_count,
-                        &mut self.literal_buffer,
-                        false,
-                    );
-                    //
-                    let is_erasable = self.literal_buffer.iter().all(|l| {
-                        if l.index == variable_index {
-                            debug_assert!(l.sign == heap_item.value);
-                            true
-                        } else {
-                            self.analyzer_buffer.get(l.index).is_some_and(|v| v.sign == l.sign)
-                        }
-                    });
-                    if !is_erasable {
-                        literals.push(Literal { index: variable_index, sign: heap_item.sign });
-                    }
-                } else {
-                    literals.push(Literal { index: variable_index, sign: heap_item.sign });
-                }
-            }
-            if literals.len() < n {
-                // eprintln!("simpify {} -> {}", n, literals.len());
-            }
-        }
-    */
 }
-
-/*
-struct AnalyzerBufferValue {
-    sign: bool,
-    value: bool,
-    decision_level: VariableSize,
-    assignment_level: VariableSize,
-    reason: Reason,
-}
-
-struct AnalyzerBufferComparator {}
-
-impl Comparator<VariableSize, AnalyzerBufferValue> for AnalyzerBufferComparator {
-    #[inline(always)]
-    fn compare(lhs: &(u32, AnalyzerBufferValue), rhs: &(u32, AnalyzerBufferValue)) -> std::cmp::Ordering {
-        rhs.1.assignment_level.cmp(&lhs.1.assignment_level)
-    }
-}
-*/

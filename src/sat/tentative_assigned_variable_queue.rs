@@ -40,7 +40,7 @@ impl TentativeAssignedVariableQueue {
         self.conflicting_variables.pop_first()
     }
 
-    #[inline(never)]
+    #[inline(always)]
     pub fn pop_consistent_variable(&mut self) -> Option<(VariableSize, bool, Reason)> {
         match self.consistent_variables.pop_first() {
             Some((variable_index, (value, reason))) => Some((variable_index, value, reason)),
@@ -48,7 +48,7 @@ impl TentativeAssignedVariableQueue {
         }
     }
 
-    #[inline(never)]
+    #[inline(always)]
     pub fn push(&mut self, variable_index: VariableSize, value: bool, reason: Reason) {
         if self.conflicting_variables.contains_key(variable_index) {
             // variable_index が既にに矛盾している場合
@@ -97,11 +97,11 @@ pub struct TentativeAssignedVariableComparator {
 
 impl TentativeAssignedVariableComparator {
     #[inline(always)]
-    pub fn reason_to_tuple(reason: &Reason) -> (u8, VariableSize, VariableSize) {
+    pub fn reason_to_tuple(reason: &Reason) -> (u8, VariableSize, VariableSize, VariableSize) {
         match reason {
-            Reason::Decision => (0, 0, 0),
-            Reason::Propagation { lbd: pldb_upper, assignment_level_at_propagated, .. } => {
-                (1, *pldb_upper, *assignment_level_at_propagated)
+            Reason::Decision => (0, 0, 0, 0),
+            Reason::Propagation { lbd, clause_length, assignment_level_at_propagated, .. } => {
+                (1, *lbd, *clause_length, *assignment_level_at_propagated)
             }
         }
     }
@@ -111,7 +111,7 @@ impl TentativeAssignedVariableComparator {
         // TODO: ここのパフォーマンスは要確認．重たければタプルを事前に計算してヒープに持たせておく
         let l = Self::reason_to_tuple(lhs);
         let r = Self::reason_to_tuple(rhs);
-        l.cmp(&r)
+        l.partial_cmp(&r).unwrap()
     }
 }
 
@@ -133,6 +133,8 @@ impl Comparator<VariableSize, [Reason; 2]> for ConflictingVariableComparator {
         let l1 = TentativeAssignedVariableComparator::reason_to_tuple(&lhs.1[1]);
         let r0 = TentativeAssignedVariableComparator::reason_to_tuple(&rhs.1[0]);
         let r1 = TentativeAssignedVariableComparator::reason_to_tuple(&rhs.1[1]);
-        (l0.0 + l1.0, l0.1 + l1.1, l0.2.max(l1.2)).cmp(&(r0.0 + r1.0, r0.1 + r1.1, r0.2.max(r1.2)))
+        (l0.0 + l1.0, l0.1 + l1.1, l0.2 + l1.2, l0.3 + l1.3)
+            .partial_cmp(&(r0.0 + r1.0, r0.1 + r1.1, r0.2 + r1.2, r0.3 + r1.3))
+            .unwrap()
     }
 }

@@ -19,7 +19,7 @@ struct Clause {
     is_learnt: bool,
     lbd: VariableSize,
     is_deleted: bool,
-    last_used_time: usize,
+    generated_time: usize,
     activity: f64,
 }
 
@@ -69,16 +69,15 @@ impl ClauseTheory {
         variable_manager: &VariableManager,
         mut literals: Array<VariableSize, Literal>,
         is_learnt: bool,
-        conflict_count: usize,
         tentative_assigned_variable_queue: &mut TentativeAssignedVariableQueue,
     ) {
         // TODO: あとで対応(すべてのリテラルに偽が割り当てられているケースはひとまず考えない)
-        assert!(!literals.iter().all(|literal| variable_manager.is_false(*literal)));
+        debug_assert!(!literals.iter().all(|literal| variable_manager.is_false(*literal)));
         let clause_index = self.clause_infos.len();
 
         let lbd;
         if literals.len() == 0 {
-            assert!(false); // TODO: あとで対応(上の all での判定で除かれるはず)
+            debug_assert!(false); // TODO: あとで対応(上の all での判定で除かれるはず)
             lbd = 0;
         } else if literals.len() == 1 {
             lbd = 0;
@@ -88,7 +87,8 @@ impl ClauseTheory {
                     literals[0].sign,
                     Reason::Propagation {
                         clause_index: clause_index,
-                        lbd,
+                        lbd: lbd,
+                        clause_length: 1,
                         assignment_level_at_propagated: variable_manager.current_assignment_level(),
                     },
                 );
@@ -111,7 +111,7 @@ impl ClauseTheory {
                 }
                 VariableState::Unassigned { .. } => (1, 0),
             });
-            assert!(variable_manager.is_true(literals[0]) || !variable_manager.is_assigned(literals[0]));
+            debug_assert!(variable_manager.is_true(literals[0]) || !variable_manager.is_assigned(literals[0]));
             // 先頭の 2 つを監視リテラルに
             for (k, literal) in literals.iter().enumerate().take(2) {
                 self.watched_infos[literal.index][1 - (literal.sign as usize)].push(WatchedBy {
@@ -124,12 +124,25 @@ impl ClauseTheory {
             if variable_manager.is_false(literals[1]) {
                 // 末尾の監視リテラルに偽が割り当てられている場合には未割り当ての監視リテラルに真を割り当て
                 if !variable_manager.is_assigned(literals[0]) {
+                    let mut lbd_upper = lbd;
+                    for literal in literals.iter() {
+                        if let VariableState::Assigned { decision_level, reason, .. } =
+                            variable_manager.get_state(literal.index)
+                        {
+                            if decision_level == variable_manager.current_decision_level() {
+                                if let Reason::Propagation { lbd: u, .. } = reason {
+                                    lbd_upper += u - 1;
+                                }
+                            }
+                        }
+                    }
                     tentative_assigned_variable_queue.push(
                         literals[0].index,
                         literals[0].sign,
                         Reason::Propagation {
                             clause_index: clause_index,
-                            lbd,
+                            lbd: lbd_upper,
+                            clause_length: literals.len(),
                             assignment_level_at_propagated: variable_manager.current_assignment_level(),
                         },
                     );
@@ -148,7 +161,7 @@ impl ClauseTheory {
             is_learnt: is_learnt,
             lbd: lbd,
             is_deleted: false,
-            last_used_time: conflict_count,
+            generated_time: self.time,
             activity: self.activity_increase_value,
         });
     }
@@ -215,26 +228,26 @@ impl ClauseTheory {
                         clause.lbd = lbd;
                     }
                     //
-                    // let mut ldbd_upper = lbd;
-                    // for literal in clause.literals.iter() {
-                    //     if let VariableState::Assigned { decision_level, reason, .. } =
-                    //         variable_manager.get_state(literal.index)
-                    //     {
-                    //         if decision_level == variable_manager.current_decision_level() {
-                    //             if let Reason::Propagation { lbd: u, .. } = reason {
-                    //                 ldbd_upper += u - 1;
-                    //             }
-                    //         }
-                    //     }
-                    // }
-                    // ldbd_upper = ldbd_upper.min(variable_manager.current_decision_level());
+                    let mut lbd_upper = lbd;
+                    for literal in clause.literals.iter() {
+                        if let VariableState::Assigned { decision_level, reason, .. } =
+                            variable_manager.get_state(literal.index)
+                        {
+                            if decision_level == variable_manager.current_decision_level() {
+                                if let Reason::Propagation { lbd: u, .. } = reason {
+                                    lbd_upper += u - 1;
+                                }
+                            }
+                        }
+                    }
                     // もう一方の監視リテラルに真を割り当て
                     tentative_assigned_variable_queue.push(
                         another_watched_literal.index,
                         another_watched_literal.sign,
                         Reason::Propagation {
                             clause_index: clause_index,
-                            lbd: lbd,
+                            lbd: lbd_upper,
+                            clause_length: clause.literals.len(),
                             assignment_level_at_propagated: variable_manager.current_assignment_level(),
                         },
                     );
@@ -245,23 +258,22 @@ impl ClauseTheory {
     }
 
     pub fn explain(
-        &mut self,
+        &self,
         variable_index: VariableSize,
         value: bool,
         reason: Reason,
         clause: &mut Array<VariableSize, Literal>,
-        inclease: bool, // TODO: アクティビティ増大の指定方法がダサいのでなにか考える
     ) {
         assert!(matches!(reason, Reason::Propagation { .. }));
         let Reason::Propagation { clause_index, .. } = reason else {
             unreachable!();
         };
         assert!(self.clause_infos[clause_index].literals.iter().any(|l| l.index == variable_index && l.sign == value));
-        self.clause_infos[clause_index].last_used_time = self.time;
-        if inclease {
-            self.clause_infos[clause_index].activity += self.activity_increase_value;
-        }
         clause.clone_from(&self.clause_infos[clause_index].literals);
+    }
+
+    pub fn increase_activity(&mut self, clause_index: ConstraintSize) {
+        self.clause_infos[clause_index].activity += self.activity_increase_value;
     }
 
     pub fn advance_time(&mut self) {
@@ -278,7 +290,9 @@ impl ClauseTheory {
     }
 
     pub fn is_request_restart(&self) -> bool {
-        self.current_lbd_average.get() > self.lbd_average.get() || self.time > self.last_reduction_time + 20000
+        self.clause_reduction_count == 0
+            || self.current_lbd_average.get() > self.lbd_average.get()
+            || self.time > self.last_reduction_time + 10000 + 100 * self.clause_reduction_count
     }
 
     pub fn restart(&mut self, variable_manager: &VariableManager) {
@@ -286,9 +300,9 @@ impl ClauseTheory {
         eprintln!("pldb_average={} current_pldb_average={}", self.lbd_average.get(), self.current_lbd_average.get());
         self.current_lbd_average.reset();
 
-        if self.time > self.last_reduction_time + 10000 {
-            self.clause_reduction_count += 1;
-            self.last_reduction_time = self.time;
+        if self.clause_reduction_count == 0
+            || self.time > self.last_reduction_time + 5000 + 100 * self.clause_reduction_count
+        {
             // 決定レベル 0 で充足されている節を削除
             for clause in self.clause_infos.iter_mut().filter(|c| !c.is_deleted) {
                 let satisfied = clause.literals.iter().any(|l| variable_manager.is_true(*l));
@@ -310,14 +324,14 @@ impl ClauseTheory {
             }
 
             // 削除対象の候補を列挙
-            let mut clause_priority_order = Vec::from_iter((0..self.clause_infos.len()).filter(
-                |i| {
-                    self.clause_infos[*i].is_learnt
+            let mut clause_priority_order = Vec::from_iter((0..self.clause_infos.len()).filter(|i| {
+                self.clause_infos[*i].is_learnt
                         && !self.clause_infos[*i].is_deleted
-                        && self.clause_infos[*i].lbd >= 3
-                        && (self.clause_infos[*i].lbd >= 6 || self.clause_infos[*i].last_used_time + 20000 < self.time)
-                }, /* && self.clause_infos[*i].last_used_time_stamp + 30000 < conflict_count*/
-            ));
+                        // && self.clause_infos[*i].lbd > 3
+                        // && (self.clause_infos[*i].lbd > 6 || self.clause_infos[*i].last_used_time + 10000 < self.time)
+                        // && self.clause_infos[*i].last_used_time + 5000 < self.time
+                        && self.clause_infos[*i].generated_time < self.last_reduction_time
+            }));
             // 削除の優先度の高い順にソート
             clause_priority_order.sort_unstable_by(|l, r| {
                 let lhs = self.clause_infos[*l].activity;
@@ -361,6 +375,8 @@ impl ClauseTheory {
                     lbd_ammount as f64 / number_of_learnt_clauses as f64
                 );
             }
+            self.clause_reduction_count += 1;
+            self.last_reduction_time = self.time;
         }
     }
 

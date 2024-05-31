@@ -3,6 +3,7 @@ mod calculate_lbd;
 mod clause_theory;
 mod exponential_smoother;
 mod read_cnf;
+mod simplify;
 mod solver;
 mod tentative_assigned_variable_queue;
 mod types;

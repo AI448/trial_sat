@@ -6,7 +6,7 @@ pub struct SATProblem {
     pub clauses: Array<ConstraintSize, Array<VariableSize, Literal>>,
 }
 
-fn parse_line(line: &String) -> Array<VariableSize, Literal> {
+fn parse_line(line: &str) -> Array<VariableSize, Literal> {
     let mut clause = Array::default();
     let mut found_zero = false;
     for field in line.split_whitespace() {

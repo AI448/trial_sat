@@ -7,5 +7,5 @@ mod size;
 pub use array::Array;
 pub use base::Comparator;
 pub use base::FiniteHeapedMap;
-
+pub use base::FiniteMap;
 pub use set::Set;

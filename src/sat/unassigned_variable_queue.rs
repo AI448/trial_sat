@@ -10,6 +10,7 @@ pub struct UnassignedVariableQueue {
 }
 
 impl UnassignedVariableQueue {
+    #[inline(never)]
     pub fn new(time_constant: f64) -> Self {
         UnassignedVariableQueue {
             time_constant: time_constant,
@@ -19,25 +20,30 @@ impl UnassignedVariableQueue {
         }
     }
 
+    #[inline(always)]
     pub fn capacity(&self) -> VariableSize {
         assert!(self.activities.len() == self.queue.capacity());
         self.activities.len()
     }
 
+    #[inline(always)]
     pub fn is_empty(&self) -> bool {
         assert!(self.activities.is_empty() == self.queue.is_empty());
         self.activities.is_empty()
     }
 
+    #[inline(always)]
     pub fn reserve(&mut self, additional: VariableSize) {
         self.activities.resize(self.activities.len() + additional, 0.0);
         self.queue.reserve(additional);
     }
 
+    #[inline(always)]
     pub fn push(&mut self, variable_index: VariableSize) {
         self.queue.insert(variable_index, self.activities[variable_index]);
     }
 
+    #[inline(always)]
     pub fn pop(&mut self) -> Option<VariableSize> {
         match self.queue.pop_first() {
             Some((variable_index, ..)) => Some(variable_index),
@@ -45,6 +51,12 @@ impl UnassignedVariableQueue {
         }
     }
 
+    #[inline(always)]
+    pub fn get_activity(&self, variable_index: VariableSize) -> &f64 {
+        &self.activities[variable_index]
+    }
+
+    #[inline(always)]
     pub fn increase_activity(&mut self, variable_index: VariableSize) {
         self.activities[variable_index] += self.increase_value;
         if self.queue.contains_key(variable_index) {
@@ -52,6 +64,7 @@ impl UnassignedVariableQueue {
         }
     }
 
+    #[inline(never)]
     pub fn advance_time(&mut self) {
         self.increase_value /= 1.0 - 1.0 / self.time_constant;
         if self.increase_value > 1e4 {

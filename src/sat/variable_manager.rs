@@ -2,10 +2,16 @@ use super::types::{ConstraintSize, Literal, VariableSize};
 use crate::finite_collections::Array;
 
 /// 割り当て理由
+// TODO もっと上位で定義すべき
 #[derive(Clone, Copy)]
 pub enum Reason {
     Decision,
-    Propagation { clause_index: ConstraintSize, lbd: VariableSize, assignment_level_at_propagated: VariableSize },
+    Propagation {
+        clause_index: ConstraintSize,
+        lbd: VariableSize,
+        clause_length: VariableSize,
+        assignment_level_at_propagated: VariableSize,
+    },
 }
 
 /// 変数の状態
@@ -49,6 +55,7 @@ impl VariableManager {
         self.assignment_infos.len()
     }
 
+    #[inline(always)]
     pub fn expand(&mut self, additional: VariableSize) {
         self.variable_infos.resize_with(self.variable_infos.len() + additional, || VariableInfo {
             value: false,
