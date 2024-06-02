@@ -1,9 +1,10 @@
 use crate::finite_collections::Array;
+use average::{AverageTrait, ExponentialMovingAverage, MovingAverage};
 
 use super::calculate_lbd::CalculateLBD;
-use super::exponential_smoother::{ExponentialSmoother, ExponentialSmootherWithRunUpPeriod};
 use super::tentative_assigned_variable_queue::TentativeAssignedVariableQueue;
 use super::types::{ConstraintSize, Literal, VariableSize};
+use super::unassigned_variable_queue::UnassignedVariableQueue;
 use super::variable_manager::{Reason, VariableManager, VariableState};
 
 #[derive(Clone, Copy)]
@@ -20,6 +21,7 @@ struct Clause {
     lbd: VariableSize,
     is_deleted: bool,
     generated_time: usize,
+    last_used_time: usize,
     activity: f64,
 }
 
@@ -30,8 +32,8 @@ pub struct ClauseTheory {
     clause_infos: Array<ConstraintSize, Clause>,
     calculate_lbd: CalculateLBD,
     time: usize,
-    lbd_average: ExponentialSmootherWithRunUpPeriod,
-    current_lbd_average: ExponentialSmoother,
+    lbd_average: ExponentialMovingAverage<f64>,
+    current_lbd_average: MovingAverage<f64>,
     last_reduction_time: usize,
     check_count: usize,
     skip_by_cached_count: usize,
@@ -41,16 +43,20 @@ pub struct ClauseTheory {
 }
 
 impl ClauseTheory {
-    pub fn new(activity_time_constant: f64) -> Self {
+    pub fn new(
+        lbd_averaging_time_constant: usize,
+        current_lbd_averaging_time_constant: usize,
+        clause_activity_time_constant: usize,
+    ) -> Self {
         ClauseTheory {
-            activity_time_constant: activity_time_constant,
+            activity_time_constant: clause_activity_time_constant as f64,
             activity_increase_value: 1.0,
             watched_infos: Array::default(),
             clause_infos: Array::default(),
             calculate_lbd: CalculateLBD::default(),
             time: 0,
-            lbd_average: ExponentialSmootherWithRunUpPeriod::new(1e6, 1e6),
-            current_lbd_average: ExponentialSmoother::new(1e1),
+            lbd_average: ExponentialMovingAverage::new(lbd_averaging_time_constant),
+            current_lbd_average: MovingAverage::new(current_lbd_averaging_time_constant),
             last_reduction_time: 0,
             check_count: 0,
             skip_by_cached_count: 0,
@@ -70,6 +76,7 @@ impl ClauseTheory {
         mut literals: Array<VariableSize, Literal>,
         is_learnt: bool,
         tentative_assigned_variable_queue: &mut TentativeAssignedVariableQueue,
+        unassigned_variable_queue: &UnassignedVariableQueue,
     ) {
         // TODO: あとで対応(すべてのリテラルに偽が割り当てられているケースはひとまず考えない)
         debug_assert!(!literals.iter().all(|literal| variable_manager.is_false(*literal)));
@@ -87,6 +94,7 @@ impl ClauseTheory {
                     literals[0].sign,
                     Reason::Propagation {
                         clause_index: clause_index,
+                        activity: *unassigned_variable_queue.get_activity(literals[0].index),
                         lbd: lbd,
                         clause_length: 1,
                         assignment_level_at_propagated: variable_manager.current_assignment_level(),
@@ -141,6 +149,7 @@ impl ClauseTheory {
                         literals[0].sign,
                         Reason::Propagation {
                             clause_index: clause_index,
+                            activity: *unassigned_variable_queue.get_activity(literals[0].index),
                             lbd: lbd_upper,
                             clause_length: literals.len(),
                             assignment_level_at_propagated: variable_manager.current_assignment_level(),
@@ -162,6 +171,7 @@ impl ClauseTheory {
             lbd: lbd,
             is_deleted: false,
             generated_time: self.time,
+            last_used_time: self.time,
             activity: self.activity_increase_value,
         });
     }
@@ -171,6 +181,7 @@ impl ClauseTheory {
         variable_manager: &VariableManager,
         assigned_variable_index: VariableSize,
         tentative_assigned_variable_queue: &mut TentativeAssignedVariableQueue,
+        unassigned_variable_queue: &UnassignedVariableQueue,
     ) {
         let VariableState::Assigned { value: assigned_value, .. } = variable_manager.get_state(assigned_variable_index)
         else {
@@ -246,6 +257,7 @@ impl ClauseTheory {
                         another_watched_literal.sign,
                         Reason::Propagation {
                             clause_index: clause_index,
+                            activity: *unassigned_variable_queue.get_activity(another_watched_literal.index),
                             lbd: lbd_upper,
                             clause_length: clause.literals.len(),
                             assignment_level_at_propagated: variable_manager.current_assignment_level(),
@@ -274,6 +286,7 @@ impl ClauseTheory {
 
     pub fn increase_activity(&mut self, clause_index: ConstraintSize) {
         self.clause_infos[clause_index].activity += self.activity_increase_value;
+        self.clause_infos[clause_index].last_used_time = self.time;
     }
 
     pub fn advance_time(&mut self) {
@@ -290,15 +303,22 @@ impl ClauseTheory {
     }
 
     pub fn is_request_restart(&self) -> bool {
-        self.clause_reduction_count == 0
-            || self.current_lbd_average.get() > self.lbd_average.get()
-            || self.time > self.last_reduction_time + 10000 + 100 * self.clause_reduction_count
+        let lbd_is_too_large = self.current_lbd_average.value() * self.current_lbd_average.count() as f64
+            / self.current_lbd_average.time_constant() as f64
+            > self.lbd_average.value();
+        let restart_interval_is_too_long =
+            self.time > self.last_reduction_time + 2 * (5000 + 100 * self.clause_reduction_count);
+        lbd_is_too_large || restart_interval_is_too_long
     }
 
     pub fn restart(&mut self, variable_manager: &VariableManager) {
         assert!(variable_manager.current_decision_level() == 0);
-        eprintln!("pldb_average={} current_pldb_average={}", self.lbd_average.get(), self.current_lbd_average.get());
-        self.current_lbd_average.reset();
+        eprintln!(
+            "pldb_average={} current_pldb_average={}",
+            self.lbd_average.value(),
+            self.current_lbd_average.value()
+        );
+        self.current_lbd_average.clear();
 
         if self.clause_reduction_count == 0
             || self.time > self.last_reduction_time + 5000 + 100 * self.clause_reduction_count
@@ -326,11 +346,11 @@ impl ClauseTheory {
             // 削除対象の候補を列挙
             let mut clause_priority_order = Vec::from_iter((0..self.clause_infos.len()).filter(|i| {
                 self.clause_infos[*i].is_learnt
-                        && !self.clause_infos[*i].is_deleted
-                        // && self.clause_infos[*i].lbd > 3
-                        // && (self.clause_infos[*i].lbd > 6 || self.clause_infos[*i].last_used_time + 10000 < self.time)
-                        // && self.clause_infos[*i].last_used_time + 5000 < self.time
-                        && self.clause_infos[*i].generated_time < self.last_reduction_time
+                    && !self.clause_infos[*i].is_deleted
+                    && self.clause_infos[*i].lbd >= 3
+                    && (self.clause_infos[*i].lbd >= 6
+                        || self.clause_infos[*i].last_used_time < self.last_reduction_time)
+                    && self.clause_infos[*i].generated_time < self.last_reduction_time
             }));
             // 削除の優先度の高い順にソート
             clause_priority_order.sort_unstable_by(|l, r| {

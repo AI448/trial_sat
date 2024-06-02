@@ -97,11 +97,11 @@ pub struct TentativeAssignedVariableComparator {
 
 impl TentativeAssignedVariableComparator {
     #[inline(always)]
-    pub fn reason_to_tuple(reason: &Reason) -> (u8, VariableSize, VariableSize, VariableSize) {
+    pub fn reason_to_tuple(reason: &Reason) -> (u8, f64, VariableSize, VariableSize, VariableSize) {
         match reason {
-            Reason::Decision => (0, 0, 0, 0),
-            Reason::Propagation { lbd, clause_length, assignment_level_at_propagated, .. } => {
-                (1, *lbd, *clause_length, *assignment_level_at_propagated)
+            Reason::Decision => (0, 0.0, 0, 0, 0),
+            Reason::Propagation { activity, lbd, clause_length, assignment_level_at_propagated, .. } => {
+                (1, -activity, *lbd, *clause_length, *assignment_level_at_propagated)
             }
         }
     }
@@ -133,8 +133,8 @@ impl Comparator<VariableSize, [Reason; 2]> for ConflictingVariableComparator {
         let l1 = TentativeAssignedVariableComparator::reason_to_tuple(&lhs.1[1]);
         let r0 = TentativeAssignedVariableComparator::reason_to_tuple(&rhs.1[0]);
         let r1 = TentativeAssignedVariableComparator::reason_to_tuple(&rhs.1[1]);
-        (l0.0 + l1.0, l0.1 + l1.1, l0.2 + l1.2, l0.3 + l1.3)
-            .partial_cmp(&(r0.0 + r1.0, r0.1 + r1.1, r0.2 + r1.2, r0.3 + r1.3))
+        (l0.0 + l1.0, l0.1 + l1.1, l0.2 + l1.2, l0.3 + l1.3, l0.4 + l1.4)
+            .partial_cmp(&(r0.0 + r1.0, r0.1 + r1.1, r0.2 + r1.2, r0.3 + r1.3, r0.4 + r1.4))
             .unwrap()
     }
 }

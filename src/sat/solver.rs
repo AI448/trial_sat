@@ -1,5 +1,3 @@
-// use std::collections::VecDeque;
-
 use crate::finite_collections::Array;
 
 use super::analyze::Analyze;
@@ -42,7 +40,7 @@ impl SATSolver {
             variable_manager: VariableManager::default(),
             tentative_assigned_variable_queue: TentativeAssignedVariableQueue::default(),
             unassigned_variable_queue: UnassignedVariableQueue::new(20.0),
-            clause_theory: ClauseTheory::new(1e4),
+            clause_theory: ClauseTheory::new(100000, 100, 1000),
             analyze: Analyze::default(),
             conflict_count: 0usize,
             restart_count: 0usize,
@@ -81,6 +79,7 @@ impl SATSolver {
             literals.clone(),
             false,
             &mut self.tentative_assigned_variable_queue,
+            &self.unassigned_variable_queue,
         );
     }
 
@@ -138,6 +137,7 @@ impl SATSolver {
                     learnt_clause,
                     true,
                     &mut self.tentative_assigned_variable_queue,
+                    &self.unassigned_variable_queue,
                 );
                 // 時刻を 1 つ進める(内部でアクティビティの指数平滑化を行っているため)
                 self.unassigned_variable_queue.advance_time();
@@ -146,18 +146,18 @@ impl SATSolver {
                 // 未割り当ての変数がなくなれば充足可能
                 return SearchResult::Satisfiable;
             } else if self.clause_theory.is_request_restart() {
-                // 矛盾回数が閾値に達したらリスタート
+                // 条件を満たしたらリスタート
                 if self.variable_manager.current_decision_level() != 0 {
                     self.backjump(0);
                 }
+                self.clause_theory.restart(&self.variable_manager);
                 eprintln!(
                     "restart_count={} conflict_count={} fixed={}",
                     self.restart_count,
                     self.conflict_count,
-                    self.variable_manager.number_of_assigned_variables()
+                    self.variable_manager.number_of_assigned_variables(),
                 );
                 self.restart_count += 1;
-                self.clause_theory.restart(&self.variable_manager);
             } else {
                 // 決定変数を選択
                 self.decide();
@@ -237,6 +237,7 @@ impl SATSolver {
                 &self.variable_manager,
                 variable_index,
                 &mut self.tentative_assigned_variable_queue,
+                &self.unassigned_variable_queue,
             );
         }
 

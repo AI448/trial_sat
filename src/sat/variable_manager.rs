@@ -8,6 +8,7 @@ pub enum Reason {
     Decision,
     Propagation {
         clause_index: ConstraintSize,
+        activity: f64,
         lbd: VariableSize,
         clause_length: VariableSize,
         assignment_level_at_propagated: VariableSize,

@@ -4,11 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-num = "0.4.3"
+num = {package = "num", version = "0.4.3"}
+average = {package = "average", path = "submodules/average"}
 
 [profile.dev]
 opt-level = 3
 
 [profile.release]
+debug = "line-directives-only"
 lto = true
 panic = "abort"
