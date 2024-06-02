@@ -1,0 +1,3 @@
+[submodule "submodules/average"]
+	path = submodules/average
+	url = https://github.com/AI448/rust_crate-average.git
