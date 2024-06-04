@@ -1,6 +1,7 @@
 // mod finite_heaped_map;
 mod array;
 mod base;
+pub mod indirect_heap;
 mod set;
 mod size;
 

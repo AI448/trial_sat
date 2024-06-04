@@ -3,7 +3,11 @@ RELEASE_BINARY=target/release/trial_sat
 
 .PHONY: format test clean $(DEV_BINARY) $(RELEASE_BINARY)
 
-all: $(DEV_BINARY) $(RELEASE_BINARY)
+all: release dev
+
+release: $(RELEASE_BINARY)
+
+dev: $(DEV_BINARY)
 
 format:
 	cargo fmt
@@ -14,7 +18,7 @@ $(DEV_BINARY):
 $(RELEASE_BINARY):
 	cargo build --profile=release
 
-test: target/release/trial_sat
+test: release dev
 	cd tests && python solve_all_instances.py
 
 clean:

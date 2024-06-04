@@ -2,9 +2,8 @@ use crate::finite_collections::{Array, Comparator, FiniteHeapedMap};
 
 use super::clause_theory::ClauseTheory;
 use super::simplify::Simplify;
-use super::types::{ConstraintSize, Literal, VariableSize};
-use super::unassigned_variable_queue::UnassignedVariableQueue;
-use super::variable_manager::{Reason, VariableManager, VariableState};
+use super::types::{Literal, Reason, VariableSize};
+use super::variables::{VariableState, Variables};
 
 struct AnalyzerBufferValue {
     // TODO 検討 豪華すぎるので削減してもいいかも
@@ -34,21 +33,20 @@ impl Analyze {
     #[inline(never)]
     pub fn analyze(
         &mut self,
-        variables: &VariableManager,
-        theory: &mut ClauseTheory, // TODO mut で渡すのかっこ悪い
-        conflicting_variable_index: ConstraintSize,
+        conflicting_variable_index: VariableSize,
         reasons: [Reason; 2],
-        unassigned_variable_queue: &mut UnassignedVariableQueue, // TODO mut で渡すのかっこ悪い
+        variables: &mut Variables,
+        theory: &mut ClauseTheory,
     ) -> (VariableSize, Array<VariableSize, Literal>) {
         self.analyzer_buffer.clear();
-        if self.analyzer_buffer.capacity() < variables.number_of_variables() {
-            self.analyzer_buffer.reserve(variables.number_of_variables() - self.analyzer_buffer.capacity());
+        if self.analyzer_buffer.capacity() < variables.dimension() {
+            self.analyzer_buffer.reserve(variables.dimension() - self.analyzer_buffer.capacity());
         }
         // 矛盾している 2 つの節を融合
         for (reason, value) in reasons.iter().zip([false, true]) {
             // 矛盾が生じている変数のアクティビティを増大
-            unassigned_variable_queue.increase_activity(conflicting_variable_index);
-            self.resolve(variables, theory, conflicting_variable_index, value, *reason);
+            variables.increase_activity(conflicting_variable_index);
+            self.resolve(conflicting_variable_index, value, *reason, variables, theory);
         }
         // バックジャンプ可能な節が獲られるまで融合を繰り返す
         loop {
@@ -76,10 +74,10 @@ impl Analyze {
                         learnt_clause.push(Literal { index: *variable_index, sign: buffer_value.sign });
                     }
                     // simplify
-                    self.simplify.simplify(variables, theory, &mut learnt_clause);
+                    self.simplify.simplify(&mut learnt_clause, variables, theory);
                     // 学習節に含まれる変数のアクティビティを増大
                     for literal in learnt_clause.iter() {
-                        unassigned_variable_queue.increase_activity(literal.index);
+                        variables.increase_activity(literal.index);
                     }
                     return (*second_largest_decision_level, learnt_clause);
                 }
@@ -89,20 +87,20 @@ impl Analyze {
             let value = !self.analyzer_buffer.first_key_value().unwrap().1.sign;
             let reason = self.analyzer_buffer.first_key_value().unwrap().1.reason;
             // 消去対象の変数のアクティビティを増大
-            unassigned_variable_queue.increase_activity(variable_index);
+            variables.increase_activity(variable_index);
             // 節融合
-            self.resolve(variables, theory, variable_index, value, reason);
+            self.resolve(variable_index, value, reason, variables, theory);
         }
     }
 
     #[inline(never)]
     fn resolve(
         &mut self,
-        variable_manager: &VariableManager,
-        theory: &mut ClauseTheory,
         variable_index: VariableSize,
         value: bool,
         reason: Reason,
+        variables: &Variables,
+        theory: &mut ClauseTheory,
     ) {
         // 割り当てを説明する節を取得
         self.literals.clear();
@@ -119,18 +117,18 @@ impl Analyze {
             } else {
                 // リテラルが含まれていない場合
                 // リテラルが割り当て済みかつ割り当てレベルが非零ならそのリテラルを追加
-                if let VariableState::Assigned { value, decision_level, assignment_level, reason } =
-                    variable_manager.get_state(literal.index)
+                if let VariableState::Assigned { assigned_value, decision_level, assignment_level, reason } =
+                    variables.get(literal.index)
                 {
-                    debug_assert!(value == !literal.sign); // 偽が割り当てられているはず
-                    if decision_level != 0 {
+                    debug_assert!(*assigned_value == !literal.sign); // 偽が割り当てられているはず
+                    if *decision_level != 0 {
                         self.analyzer_buffer.insert(
                             literal.index,
                             AnalyzerBufferValue {
                                 sign: literal.sign,
-                                decision_level: decision_level,
-                                assignment_level: assignment_level,
-                                reason: reason,
+                                decision_level: *decision_level,
+                                assignment_level: *assignment_level,
+                                reason: *reason,
                             },
                         );
                     }
