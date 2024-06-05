@@ -1,7 +1,7 @@
 use crate::finite_collections::{Array, Set};
 
 use super::types::{Literal, VariableSize};
-use super::variables::{VariableState, Variables};
+use super::variables::{Variable, Variables};
 
 #[derive(Default)]
 pub struct CalculateLBD {
@@ -17,9 +17,11 @@ impl CalculateLBD {
         }
         let mut lbd: VariableSize = 0;
         for literal in literals.iter() {
-            if let VariableState::Assigned { decision_level, .. } = variables.get(literal.index) {
-                if *decision_level != 0 && !self.decision_level_set.contains_key(*decision_level) {
-                    self.decision_level_set.insert(*decision_level);
+            if let Variable::Assigned(assigned_variable) = variables.get(literal.index) {
+                if *assigned_variable.decision_level() != 0
+                    && !self.decision_level_set.contains_key(*assigned_variable.decision_level())
+                {
+                    self.decision_level_set.insert(*assigned_variable.decision_level());
                     lbd += 1;
                 }
             }

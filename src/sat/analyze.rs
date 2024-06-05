@@ -3,7 +3,7 @@ use crate::finite_collections::{Array, Comparator, FiniteHeapedMap};
 use super::clause_theory::ClauseTheory;
 use super::simplify::Simplify;
 use super::types::{Literal, Reason, VariableSize};
-use super::variables::{VariableState, Variables};
+use super::variables::{Variable, Variables};
 
 struct AnalyzerBufferValue {
     // TODO 検討 豪華すぎるので削減してもいいかも
@@ -117,18 +117,16 @@ impl Analyze {
             } else {
                 // リテラルが含まれていない場合
                 // リテラルが割り当て済みかつ割り当てレベルが非零ならそのリテラルを追加
-                if let VariableState::Assigned { assigned_value, decision_level, assignment_level, reason } =
-                    variables.get(literal.index)
-                {
-                    debug_assert!(*assigned_value == !literal.sign); // 偽が割り当てられているはず
-                    if *decision_level != 0 {
+                if let Variable::Assigned(assigned_variable) = variables.get(literal.index) {
+                    debug_assert!(*assigned_variable.value() == !literal.sign); // 偽が割り当てられているはず
+                    if *assigned_variable.decision_level() != 0 {
                         self.analyzer_buffer.insert(
                             literal.index,
                             AnalyzerBufferValue {
                                 sign: literal.sign,
-                                decision_level: *decision_level,
-                                assignment_level: *assignment_level,
-                                reason: *reason,
+                                decision_level: *assigned_variable.decision_level(),
+                                assignment_level: *assigned_variable.assignment_level(),
+                                reason: *assigned_variable.reason(),
                             },
                         );
                     }

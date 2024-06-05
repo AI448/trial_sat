@@ -28,7 +28,7 @@ where
     (position + unsafe { SizeT::from(1).unwrap_unchecked() }) * unsafe { SizeT::from(2).unwrap_unchecked() }
 }
 
-#[inline(never)]
+#[inline(always)]
 pub fn update_heap<SizeT, ValueT, LessT>(
     heap_array: &mut Array<SizeT, (SizeT, ValueT)>,
     position_array: &mut Array<SizeT, SizeT>,

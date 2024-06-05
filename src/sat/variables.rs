@@ -8,29 +8,11 @@ use super::types::{Reason, VariableSize};
 //#[repr(align(64))] // TODO 後で検証（単に 64 byte にするとどうなるのか・size を 32byte に切り詰めて align を 32byte にするとどうなるのか）
 // 32byte を超えてしまうようならメンバは構造体にしたほうがいいかも(先頭で 3 byte 無駄になるが 64 byte を超えない限り問題ない)
 // ↑何が嬉しいんだっけ？
-pub enum VariableState {
+enum State {
     Assigned { assigned_value: bool, decision_level: VariableSize, assignment_level: VariableSize, reason: Reason },
     Conflicting { last_assigned_value: bool, reasons: [Reason; 2] },
     TentativelyAssigned { last_assigned_value: bool, tentatively_assigned_value: bool, reason: Reason },
     Unassigned { last_assigned_value: bool },
-}
-
-impl VariableState {
-    pub fn is_assigned(&self) -> bool {
-        if let VariableState::Assigned { .. } = self {
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn is_value_assigned(&self, value: bool) -> bool {
-        if let VariableState::Assigned { assigned_value, .. } = self {
-            *assigned_value == value
-        } else {
-            false
-        }
-    }
 }
 
 type ConflictingVariableScore = (f64, VariableSize, VariableSize);
@@ -42,7 +24,7 @@ type UnassignedVariableScore = f64;
 /// 変数の割り当て状態を管理する
 pub struct Variables {
     decision_level: VariableSize,
-    variable_states: Array<VariableSize, VariableState>,
+    variable_states: Array<VariableSize, State>,
     positions: Array<VariableSize, VariableSize>,
     assigned_variables: Array<VariableSize, VariableSize>,
     conflicting_variables: Array<VariableSize, (VariableSize, ConflictingVariableScore)>,
@@ -84,20 +66,20 @@ impl Variables {
         self.assigned_variables.len()
     }
 
-    #[inline(always)]
-    pub fn number_of_conflicting_variables(&self) -> VariableSize {
-        self.conflicting_variables.len()
-    }
+    // #[inline(always)]
+    // pub fn number_of_conflicting_variables(&self) -> VariableSize {
+    //     self.conflicting_variables.len()
+    // }
 
-    #[inline(always)]
-    pub fn number_of_tentative_assigned_variables(&self) -> VariableSize {
-        self.tentatively_assigned_variables.len()
-    }
+    // #[inline(always)]
+    // pub fn number_of_tentative_assigned_variables(&self) -> VariableSize {
+    //     self.tentatively_assigned_variables.len()
+    // }
 
-    #[inline(always)]
-    pub fn number_of_unassigned_variables(&self) -> VariableSize {
-        self.unassigned_variables.len()
-    }
+    // #[inline(always)]
+    // pub fn number_of_unassigned_variables(&self) -> VariableSize {
+    //     self.unassigned_variables.len()
+    // }
 
     #[inline(always)]
     pub fn current_decision_level(&self) -> VariableSize {
@@ -118,7 +100,7 @@ impl Variables {
             let initial_activity = 0.0;
             let priority = Self::calculate_unassigned_variable_score(initial_activity);
             // 未割り当て変数として初期化
-            self.variable_states.push(VariableState::Unassigned { last_assigned_value: initial_value });
+            self.variable_states.push(State::Unassigned { last_assigned_value: initial_value });
             self.activities.push(initial_activity);
             self.positions.push(Self::NULL_POSITION);
             // 未割り当て変数のキューに追加
@@ -129,51 +111,68 @@ impl Variables {
         }
     }
 
-    pub fn first_unassigned_variable(&self) -> Option<(VariableSize, &VariableState)> {
+    pub fn first_unassigned_variable(&mut self) -> Option<UnassignedVariableMut> {
         match self.unassigned_variables.first() {
             Some((index, ..)) => {
-                debug_assert!(matches!(self.variable_states[*index], VariableState::Unassigned { .. }));
-                Some((*index, &self.variable_states[*index]))
+                let index = *index;
+                debug_assert!(matches!(self.variable_states[index], State::Unassigned { .. }));
+                Some(UnassignedVariableMut { variables: self, index })
             }
             None => None,
         }
     }
 
-    pub fn first_tentatively_assigned_variable(&self) -> Option<(VariableSize, &VariableState)> {
+    #[inline(always)]
+    pub fn first_tentatively_assigned_variable(&mut self) -> Option<TentativelyAssigedVariableMut> {
         match self.tentatively_assigned_variables.first() {
-            Some((index, ..)) => {
-                debug_assert!(matches!(self.variable_states[*index], VariableState::TentativelyAssigned { .. }));
-                Some((*index, &self.variable_states[*index]))
+            Some((index, _)) => {
+                let index = *index;
+                debug_assert!(matches!(self.variable_states[index], State::TentativelyAssigned { .. }));
+                Some(TentativelyAssigedVariableMut { variables: self, index })
             }
             None => None,
         }
     }
 
-    pub fn first_conflicting_variable(&self) -> Option<(VariableSize, &VariableState)> {
+    pub fn first_conflicting_variable(&self) -> Option<ConflictingVariable> {
         match self.conflicting_variables.first() {
             Some((index, ..)) => {
-                debug_assert!(matches!(self.variable_states[*index], VariableState::Conflicting { .. }));
-                Some((*index, &self.variable_states[*index]))
+                let index = *index;
+                debug_assert!(matches!(self.variable_states[index], State::Conflicting { .. }));
+                Some(ConflictingVariable { variables: self, index })
             }
             None => None,
         }
     }
 
     #[inline(always)]
-    pub fn get(&self, index: VariableSize) -> &VariableState {
-        &self.variable_states[index]
+    pub fn get(&self, index: VariableSize) -> Variable {
+        if matches!(self.variable_states[index], State::Assigned { .. }) {
+            Variable::Assigned(AssignedVariable { variables: self, index: index })
+        } else {
+            Variable::Notassigned(NotassignedVariable { variables: self, index: index })
+        }
     }
 
     #[inline(always)]
-    pub fn tentatively_assign(&mut self, index: VariableSize, value: bool, reason: Reason) {
+    pub fn get_mut(&mut self, index: VariableSize) -> VariableMut {
+        if matches!(self.variable_states[index], State::Assigned { .. }) {
+            VariableMut::Assigned(AssignedVariable { variables: self, index: index })
+        } else {
+            VariableMut::Notassigned(NotassignedVariableMut { variables: self, index: index })
+        }
+    }
+
+    #[inline(always)]
+    fn tentatively_assign(&mut self, index: VariableSize, value: bool, reason: Reason) {
         let variable_state = &mut self.variable_states[index];
         // 現在の割当状態に応じて場合分け
         match variable_state {
-            VariableState::Unassigned { last_assigned_value } => {
+            State::Unassigned { last_assigned_value } => {
                 // 未割り当ての場合
                 // 仮割当状態に遷移
                 let score = Self::calculate_tentatively_assigned_variable_score(&reason, self.activities[index]);
-                *variable_state = VariableState::TentativelyAssigned {
+                *variable_state = State::TentativelyAssigned {
                     last_assigned_value: *last_assigned_value,
                     tentatively_assigned_value: value,
                     reason: reason,
@@ -181,7 +180,7 @@ impl Variables {
                 Self::pop_heap_item(&mut self.positions, &mut self.unassigned_variables, index);
                 Self::push_heap_item(&mut self.positions, &mut self.tentatively_assigned_variables, index, score);
             }
-            VariableState::TentativelyAssigned {
+            State::TentativelyAssigned {
                 last_assigned_value,
                 tentatively_assigned_value,
                 reason: original_reason,
@@ -208,12 +207,12 @@ impl Variables {
                     let reasons = if value == false { [reason, *original_reason] } else { [*original_reason, reason] };
                     let score = Self::calculate_conflicting_variable_score(&reasons, self.activities[index]);
                     *variable_state =
-                        VariableState::Conflicting { last_assigned_value: *last_assigned_value, reasons: reasons };
+                        State::Conflicting { last_assigned_value: *last_assigned_value, reasons: reasons };
                     Self::pop_heap_item(&mut self.positions, &mut self.tentatively_assigned_variables, index);
                     Self::push_heap_item(&mut self.positions, &mut self.conflicting_variables, index, score);
                 }
             }
-            VariableState::Conflicting { reasons: current_reasons, .. } => {
+            State::Conflicting { reasons: current_reasons, .. } => {
                 // 既に矛盾している場合
                 let new_reasons =
                     if value == false { [reason, current_reasons[1]] } else { [current_reasons[0], reason] };
@@ -225,43 +224,69 @@ impl Variables {
                     Self::change_heap_value(&mut self.positions, &mut self.conflicting_variables, index, new_score);
                 }
             }
-            VariableState::Assigned { .. } => {
+            State::Assigned { .. } => {
                 unreachable!();
             }
         }
     }
 
+    // #[inline(always)]
+    // pub fn assign(&mut self, index: VariableSize) {
+    //     let variable_state = &mut self.variable_states[index];
+    //     match &variable_state {
+    //         VariableState::TentativelyAssigned { tentatively_assigned_value, reason, .. } => {
+    //             if let Reason::Decision = reason {
+    //                 self.decision_level += 1;
+    //             }
+    //             let stack_position = self.assigned_variables.len();
+    //             *variable_state = VariableState::Assigned {
+    //                 assigned_value: *tentatively_assigned_value,
+    //                 decision_level: self.decision_level,
+    //                 assignment_level: stack_position + 1,
+    //                 reason: *reason,
+    //             };
+    //             Self::pop_heap_item(&mut self.positions, &mut self.tentatively_assigned_variables, index);
+    //             //
+    //             debug_assert!(self.positions[index] == Self::NULL_POSITION);
+    //             self.positions[index] = stack_position;
+    //             self.assigned_variables.push(index);
+    //         }
+    //         VariableState::Assigned { .. } => {
+    //             unreachable!();
+    //         }
+    //         VariableState::Conflicting { .. } => {
+    //             unreachable!();
+    //         }
+    //         VariableState::Unassigned { .. } => {
+    //             unreachable!();
+    //         }
+    //     }
+    // }
+
     #[inline(always)]
-    pub fn assign(&mut self, index: VariableSize) {
+    fn assign_tentatively_assigned_variable(&mut self, index: VariableSize) {
         let variable_state = &mut self.variable_states[index];
-        match variable_state {
-            VariableState::TentativelyAssigned { tentatively_assigned_value, reason, .. } => {
-                if let Reason::Decision = reason {
-                    self.decision_level += 1;
-                }
-                let stack_position = self.assigned_variables.len();
-                *variable_state = VariableState::Assigned {
-                    assigned_value: *tentatively_assigned_value,
-                    decision_level: self.decision_level,
-                    assignment_level: stack_position + 1,
-                    reason: *reason,
-                };
-                Self::pop_heap_item(&mut self.positions, &mut self.tentatively_assigned_variables, index);
-                //
-                debug_assert!(self.positions[index] == Self::NULL_POSITION);
-                self.positions[index] = stack_position;
-                self.assigned_variables.push(index);
-            }
-            VariableState::Assigned { .. } => {
-                unreachable!();
-            }
-            VariableState::Conflicting { .. } => {
-                unreachable!();
-            }
-            VariableState::Unassigned { .. } => {
-                unreachable!();
-            }
+        debug_assert!(matches!(variable_state, State::TentativelyAssigned { .. }));
+        let State::TentativelyAssigned { tentatively_assigned_value, reason, .. } = *variable_state else {
+            unsafe { unreachable_unchecked() }
+        };
+        // 決定変数であれば決定レベルをインクリメント
+        if let Reason::Decision = reason {
+            self.decision_level += 1;
         }
+        // 状態を更新
+        *variable_state = State::Assigned {
+            assigned_value: tentatively_assigned_value,
+            decision_level: self.decision_level,
+            assignment_level: self.assigned_variables.len() + 1,
+            reason: reason,
+        };
+        // 仮割当変数のキューから削除
+        Self::pop_heap_item(&mut self.positions, &mut self.tentatively_assigned_variables, index);
+        debug_assert!(self.positions[index] == Self::NULL_POSITION);
+        // 割当変数のスタックに追加
+        self.positions[index] = self.assigned_variables.len();
+        self.assigned_variables.push(index);
     }
 
     #[inline(never)]
@@ -269,24 +294,24 @@ impl Variables {
         while !self.conflicting_variables.is_empty() {
             let index = unsafe { self.conflicting_variables.first().unwrap_unchecked().0 };
             let variable_state = &mut self.variable_states[index];
-            debug_assert!(matches!(variable_state, VariableState::Conflicting { .. }));
-            let VariableState::Conflicting { last_assigned_value, .. } = variable_state else {
+            debug_assert!(matches!(variable_state, State::Conflicting { .. }));
+            let State::Conflicting { last_assigned_value, .. } = &variable_state else {
                 unsafe { unreachable_unchecked() }
             };
             let priority = Self::calculate_unassigned_variable_score(self.activities[index]);
-            *variable_state = VariableState::Unassigned { last_assigned_value: *last_assigned_value };
+            *variable_state = State::Unassigned { last_assigned_value: *last_assigned_value };
             Self::pop_heap_item(&mut self.positions, &mut self.conflicting_variables, index);
             Self::push_heap_item(&mut self.positions, &mut self.unassigned_variables, index, priority);
         }
         while !self.tentatively_assigned_variables.is_empty() {
             let index = unsafe { self.tentatively_assigned_variables.first().unwrap_unchecked().0 };
             let variable_state = &mut self.variable_states[index];
-            debug_assert!(matches!(variable_state, VariableState::TentativelyAssigned { .. }));
-            let VariableState::TentativelyAssigned { last_assigned_value, .. } = variable_state else {
+            debug_assert!(matches!(variable_state, State::TentativelyAssigned { .. }));
+            let State::TentativelyAssigned { last_assigned_value, .. } = &variable_state else {
                 unsafe { unreachable_unchecked() }
             };
             let score = Self::calculate_unassigned_variable_score(self.activities[index]);
-            *variable_state = VariableState::Unassigned { last_assigned_value: *last_assigned_value };
+            *variable_state = State::Unassigned { last_assigned_value: *last_assigned_value };
             Self::pop_heap_item(&mut self.positions, &mut self.tentatively_assigned_variables, index);
             Self::push_heap_item(&mut self.positions, &mut self.unassigned_variables, index, score);
         }
@@ -299,8 +324,8 @@ impl Variables {
         debug_assert!(self.positions[index] == self.assigned_variables.len());
         self.positions[index] = Self::NULL_POSITION;
         let variable_state = &mut self.variable_states[index];
-        debug_assert!(matches!(variable_state, VariableState::Assigned { .. }));
-        let VariableState::Assigned { assigned_value, decision_level, assignment_level, reason } = variable_state
+        debug_assert!(matches!(variable_state, State::Assigned { .. }));
+        let State::Assigned { assigned_value, decision_level, assignment_level, reason } = &variable_state
         else {
             unsafe {
                 unreachable_unchecked();
@@ -311,7 +336,7 @@ impl Variables {
         if let Reason::Decision = reason {
             self.decision_level -= 1;
         }
-        *variable_state = VariableState::Unassigned { last_assigned_value: *assigned_value };
+        *variable_state = State::Unassigned { last_assigned_value: *assigned_value };
         Self::push_heap_item(
             &mut self.positions,
             &mut self.unassigned_variables,
@@ -455,5 +480,191 @@ impl Variables {
         T: std::cmp::PartialOrd,
     {
         indirect_heap::up_heap(heap, positions, position, &|lhs, rhs| lhs.1 < rhs.1);
+    }
+}
+
+pub enum Variable<'a> {
+    Assigned(AssignedVariable<'a>),
+    Notassigned(NotassignedVariable<'a>),
+}
+
+impl<'a> Variable<'a> {
+    pub fn is_assigned(&self) -> bool {
+        matches!(&self, Variable::Assigned(..))
+    }
+
+    pub fn is_assigned_and_is_equal_to(&self, value: bool) -> bool {
+        if let Variable::Assigned(assigned_variable) = &self {
+            *assigned_variable.value() == value
+        } else {
+            false
+        }
+    }
+}
+
+pub enum VariableMut<'a> {
+    Assigned(AssignedVariable<'a>),
+    Notassigned(NotassignedVariableMut<'a>),
+}
+
+pub struct NotassignedVariable<'a> {
+    variables: &'a Variables,
+    index: VariableSize,
+}
+
+impl<'a> NotassignedVariable<'a> {
+    pub fn index(&self) -> VariableSize {
+        self.index
+    }
+
+    // pub fn last_assigned_value(&self) -> &bool {
+    //     match &self.variables.variable_states[self.index] {
+    //         VariableState::Unassigned { last_assigned_value } => last_assigned_value,
+    //         VariableState::TentativelyAssigned { last_assigned_value, .. } => last_assigned_value,
+    //         VariableState::Conflicting { last_assigned_value, .. } => last_assigned_value,
+    //         VariableState::Assigned { .. } => unsafe { unreachable_unchecked() },
+    //     }
+    // }
+}
+
+pub struct NotassignedVariableMut<'a> {
+    variables: &'a mut Variables,
+    index: VariableSize,
+}
+
+impl<'a> NotassignedVariableMut<'a> {
+    pub fn index(&self) -> VariableSize {
+        self.index
+    }
+
+    // pub fn last_assigned_value(&self) -> &bool {
+    //     match &self.variables.variable_states[self.index] {
+    //         VariableState::Unassigned { last_assigned_value } => last_assigned_value,
+    //         VariableState::TentativelyAssigned { last_assigned_value, .. } => last_assigned_value,
+    //         VariableState::Conflicting { last_assigned_value, .. } => last_assigned_value,
+    //         VariableState::Assigned { .. } => unsafe { unreachable_unchecked() },
+    //     }
+    // }
+
+    pub fn tentatively_assign(self, value: bool, reason: Reason) -> Self {
+        self.variables.tentatively_assign(self.index, value, reason);
+        self
+    }
+}
+
+pub struct UnassignedVariableMut<'a> {
+    variables: &'a mut Variables,
+    index: VariableSize,
+}
+
+impl<'a> UnassignedVariableMut<'a> {
+    pub fn index(&self) -> VariableSize {
+        self.index
+    }
+
+    pub fn last_assigned_value(&self) -> &bool {
+        let state = &self.variables.variable_states[self.index];
+        debug_assert!(matches!(state, State::Unassigned { .. }));
+        let State::Unassigned { last_assigned_value } = state else { unsafe { unreachable_unchecked() } };
+        last_assigned_value
+    }
+
+    pub fn tentatively_assign(self, value: bool, reason: Reason) -> Self {
+        self.variables.tentatively_assign(self.index, value, reason);
+        self
+    }
+}
+
+pub struct TentativelyAssigedVariableMut<'a> {
+    variables: &'a mut Variables,
+    index: VariableSize,
+}
+
+impl<'a> TentativelyAssigedVariableMut<'a> {
+    pub fn index(&self) -> VariableSize {
+        self.index
+    }
+
+    // pub fn value(&self) -> bool {
+    //     let state = &self.variables.variable_states[self.index];
+    //     debug_assert!(matches!(state, VariableState::TentativelyAssigned { .. }));
+    //     let VariableState::TentativelyAssigned { tentatively_assigned_value, .. } = state else {
+    //         unsafe { unreachable_unchecked() }
+    //     };
+    //     *tentatively_assigned_value
+    // }
+
+    pub fn reason(&self) -> &Reason {
+        let state = &self.variables.variable_states[self.index];
+        debug_assert!(matches!(state, State::TentativelyAssigned { .. }));
+        let State::TentativelyAssigned { reason, .. } = state else { unsafe { unreachable_unchecked() } };
+        reason
+    }
+
+    pub fn assign(self) -> AssignedVariable<'a> {
+        self.variables.assign_tentatively_assigned_variable(self.index);
+        AssignedVariable { variables: self.variables, index: self.index }
+    }
+}
+
+pub struct ConflictingVariable<'a> {
+    variables: &'a Variables,
+    index: VariableSize,
+}
+
+impl<'a> ConflictingVariable<'a> {
+    pub fn index(&self) -> VariableSize {
+        self.index
+    }
+
+    pub fn reasons(&self) -> &[Reason; 2] {
+        let state = &self.variables.variable_states[self.index];
+        debug_assert!(matches!(state, State::Conflicting { .. }));
+        let State::Conflicting { reasons, .. } = state else { unsafe { unreachable_unchecked() } };
+        reasons
+    }
+}
+
+pub struct AssignedVariable<'a> {
+    variables: &'a Variables,
+    index: VariableSize,
+}
+
+impl<'a> AssignedVariable<'a> {
+    #[inline(always)]
+    pub fn index(&self) -> VariableSize {
+        self.index
+    }
+
+    #[inline(always)]
+    pub fn value(&self) -> &bool {
+        let state = &self.variables.variable_states[self.index];
+        debug_assert!(matches!(state, State::Assigned { .. }));
+        let State::Assigned { assigned_value, .. } = state else { unsafe { unreachable_unchecked() } };
+        assigned_value
+    }
+
+    #[inline(always)]
+    pub fn assignment_level(&self) -> &VariableSize {
+        let state = &self.variables.variable_states[self.index];
+        debug_assert!(matches!(state, State::Assigned { .. }));
+        let State::Assigned { assignment_level, .. } = state else { unsafe { unreachable_unchecked() } };
+        assignment_level
+    }
+
+    #[inline(always)]
+    pub fn decision_level(&self) -> &VariableSize {
+        let state = &self.variables.variable_states[self.index];
+        debug_assert!(matches!(state, State::Assigned { .. }));
+        let State::Assigned { decision_level, .. } = state else { unsafe { unreachable_unchecked() } };
+        decision_level
+    }
+
+    #[inline(always)]
+    pub fn reason(&self) -> &Reason {
+        let state = &self.variables.variable_states[self.index];
+        debug_assert!(matches!(state, State::Assigned { .. }));
+        let State::Assigned { reason, .. } = state else { unsafe { unreachable_unchecked() } };
+        reason
     }
 }

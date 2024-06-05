@@ -3,7 +3,7 @@ use average::{AverageTrait, ExponentialMovingAverage, MovingAverage};
 
 use super::calculate_lbd::CalculateLBD;
 use super::types::{ConstraintSize, Literal, Reason, VariableSize};
-use super::variables::{VariableState, Variables};
+use super::variables::{Variable, VariableMut, Variables};
 
 #[derive(Clone, Copy)]
 struct WatchedBy {
@@ -75,7 +75,9 @@ impl ClauseTheory {
         variables: &mut Variables,
     ) {
         // TODO: あとで対応(すべてのリテラルに偽が割り当てられているケースはひとまず考えない)
-        debug_assert!(!literals.iter().all(|literal| variables.get(literal.index).is_value_assigned(!literal.sign)));
+        debug_assert!(!literals
+            .iter()
+            .all(|literal| variables.get(literal.index).is_assigned_and_is_equal_to(!literal.sign)));
         let clause_index = self.clause_infos.len();
 
         let lbd;
@@ -84,15 +86,14 @@ impl ClauseTheory {
             lbd = 0;
         } else if literals.len() == 1 {
             lbd = 0;
-            if !variables.get(literals[0].index).is_assigned() {
-                variables.tentatively_assign(
-                    literals[0].index,
+            if let VariableMut::Notassigned(not_assigned_variable) = variables.get_mut(literals[0].index) {
+                not_assigned_variable.tentatively_assign(
                     literals[0].sign,
                     Reason::Propagation {
                         clause_index: clause_index,
                         lbd: lbd,
                         clause_length: 1,
-                        assignment_level_at_propagated: variables.current_assignment_level(),
+                        assignment_level_at_propagated: 0,
                     },
                 );
             }
@@ -105,19 +106,17 @@ impl ClauseTheory {
              *    偽が割り当てられているリテラル同士では割当レベルの降順
              */
             literals.sort_by_cached_key(|l| match variables.get(l.index) {
-                VariableState::Assigned { assigned_value, assignment_level, .. } => {
-                    if *assigned_value == l.sign {
-                        (0, *assignment_level)
+                Variable::Assigned(assigned_variable) => {
+                    if *assigned_variable.value() == l.sign {
+                        (0, *assigned_variable.assignment_level())
                     } else {
-                        (2, VariableSize::MAX - *assignment_level)
+                        (2, VariableSize::MAX - *assigned_variable.assignment_level())
                     }
                 }
-                VariableState::Unassigned { .. } => (1, 0),
-                VariableState::TentativelyAssigned { .. } => (1, 0),
-                VariableState::Conflicting { .. } => (1, 0),
+                Variable::Notassigned(..) => (0, 0),
             });
             // 少なくとも先頭要素に偽が割り当てられていることはないはず
-            debug_assert!(!variables.get(literals[0].index).is_value_assigned(!literals[0].sign));
+            debug_assert!(!variables.get(literals[0].index).is_assigned_and_is_equal_to(!literals[0].sign));
             // 先頭の 2 つを監視リテラルに
             for (k, literal) in literals.iter().enumerate().take(2) {
                 self.watched_infos[literal.index][1 - (literal.sign as usize)].push(WatchedBy {
@@ -127,34 +126,16 @@ impl ClauseTheory {
                 });
             }
 
-            if variables.get(literals[1].index).is_value_assigned(!literals[1].sign) {
+            if variables.get(literals[1].index).is_assigned_and_is_equal_to(!literals[1].sign) {
                 // 末尾の監視リテラルに偽が割り当てられている場合には未割り当ての監視リテラルに真を割り当て
-                if !variables.get(literals[0].index).is_assigned() {
-                    //
-                    let mut lbd_upper = lbd;
-                    if variables.current_decision_level() != 0 {
-                        for literal in literals.iter() {
-                            if let VariableState::Assigned { decision_level, reason, .. } = variables.get(literal.index)
-                            {
-                                if *decision_level == variables.current_decision_level() {
-                                    if let Reason::Propagation { lbd: u, .. } = reason {
-                                        debug_assert!(*u >= 1);
-                                        debug_assert!(*u <= variables.current_decision_level());
-                                        lbd_upper += u - 1;
-                                    }
-                                }
-                            }
-                        }
-                        lbd_upper = lbd_upper.min(variables.current_decision_level());
-                    }
-                    variables.tentatively_assign(
-                        literals[0].index,
+                if let VariableMut::Notassigned(not_assigned_variable) = variables.get_mut(literals[0].index) {
+                    not_assigned_variable.tentatively_assign(
                         literals[0].sign,
                         Reason::Propagation {
                             clause_index: clause_index,
-                            lbd: lbd_upper,
+                            lbd: lbd,
                             clause_length: literals.len(),
-                            assignment_level_at_propagated: variables.current_assignment_level(),
+                            assignment_level_at_propagated: 0,
                         },
                     );
                 }
@@ -179,8 +160,11 @@ impl ClauseTheory {
     }
 
     pub fn propagate(&mut self, assigned_variable_index: VariableSize, variables: &mut Variables) {
-        let VariableState::Assigned { assigned_value, .. } = *variables.get(assigned_variable_index) else {
-            unreachable!();
+        let assigned_value = {
+            let Variable::Assigned(assigned_variable) = variables.get(assigned_variable_index) else {
+                unreachable!();
+            };
+            *assigned_variable.value()
         };
         let mut k: ConstraintSize = 0;
         // variable_index への value の割当を監視している節を走査
@@ -190,7 +174,7 @@ impl ClauseTheory {
                 self.watched_infos[assigned_variable_index][assigned_value as usize][k];
             // println!("c{}", clause_index);
             debug_assert!(watching_position < 2);
-            if cached_another_literal.is_some_and(|l| variables.get(l.index).is_value_assigned(l.sign)) {
+            if cached_another_literal.is_some_and(|l| variables.get(l.index).is_assigned_and_is_equal_to(l.sign)) {
                 // cached_another_literal に真が割り当てられており既に充足されているのでなにもしない
                 self.skip_by_cached_count += 1;
             } else {
@@ -199,7 +183,10 @@ impl ClauseTheory {
                 debug_assert!(watched_literal.index == assigned_variable_index);
                 debug_assert!(watched_literal.sign == !assigned_value);
                 let another_watched_literal = clause.literals[1 - watching_position];
-                if variables.get(another_watched_literal.index).is_value_assigned(another_watched_literal.sign) {
+                if variables
+                    .get(another_watched_literal.index)
+                    .is_assigned_and_is_equal_to(another_watched_literal.sign)
+                {
                     // もう一方の監視リテラルに真が割り当てられており既に充足されている場合
                     self.skip_by_another_count += 1;
                     // another_watched_literal をキャッシュしておく
@@ -208,7 +195,7 @@ impl ClauseTheory {
                 } else {
                     // 監視対象ではないリテラルを走査
                     for (l, literal) in clause.literals.iter().enumerate().skip(2) {
-                        if !variables.get(literal.index).is_value_assigned(!literal.sign) {
+                        if !variables.get(literal.index).is_assigned_and_is_equal_to(!literal.sign) {
                             // 真が割り当てられているまたは未割り当てのリテラルを発見した場合
                             // 元の監視リテラルの監視を解除
                             self.watched_infos[watched_literal.index][!watched_literal.sign as usize].swap_remove(k);
@@ -225,42 +212,29 @@ impl ClauseTheory {
                         }
                     }
                     // 真が割り当てられているまたは未割り当てのリテラルが見つからなかった場合
-                    debug_assert!(!variables
-                        .get(another_watched_literal.index)
-                        .is_value_assigned(!another_watched_literal.sign)); // もう一方の監視リテラルに false が割り当てられていることはないはず
+
+                    // もう一方の監視リテラルは未割当であるはず
+                    debug_assert!(!variables.get(another_watched_literal.index).is_assigned());
 
                     self.propagation_count += 1;
-                    // plbd を計算
+                    // lbd を計算
                     let lbd = self.calculate_lbd.calculate(&clause.literals, variables);
                     if clause.is_learnt && lbd < clause.lbd {
                         clause.lbd = lbd;
                     }
-                    //
-                    let mut lbd_upper = lbd;
-                    if variables.current_decision_level() != 0 {
-                        for literal in clause.literals.iter() {
-                            if let VariableState::Assigned { decision_level, reason, .. } = variables.get(literal.index)
-                            {
-                                if *decision_level == variables.current_decision_level() {
-                                    if let Reason::Propagation { lbd: u, .. } = reason {
-                                        debug_assert!(*u >= 1);
-                                        debug_assert!(*u <= variables.current_decision_level());
-                                        lbd_upper += u - 1;
-                                    }
-                                }
-                            }
-                        }
-                        lbd_upper = lbd_upper.min(variables.current_decision_level());
-                    }
                     // もう一方の監視リテラルに真を割り当て
-                    variables.tentatively_assign(
-                        another_watched_literal.index,
+                    let VariableMut::Notassigned(not_assigned_variable) =
+                        variables.get_mut(another_watched_literal.index)
+                    else {
+                        unreachable!()
+                    };
+                    not_assigned_variable.tentatively_assign(
                         another_watched_literal.sign,
                         Reason::Propagation {
                             clause_index: clause_index,
-                            lbd: lbd_upper,
+                            lbd: lbd,
                             clause_length: clause.literals.len(),
-                            assignment_level_at_propagated: variables.current_assignment_level(),
+                            assignment_level_at_propagated: 0,
                         },
                     );
                 }
@@ -325,7 +299,8 @@ impl ClauseTheory {
         {
             // 決定レベル 0 で充足されている節を削除
             for clause in self.clause_infos.iter_mut().filter(|c| !c.is_deleted) {
-                let satisfied = clause.literals.iter().any(|l| variables.get(l.index).is_value_assigned(l.sign));
+                let satisfied =
+                    clause.literals.iter().any(|l| variables.get(l.index).is_assigned_and_is_equal_to(l.sign));
                 if satisfied {
                     clause.is_deleted = true;
                     clause.literals.clear();
@@ -334,7 +309,8 @@ impl ClauseTheory {
                     // fix されている変数を節から削除(2 つ目のリテラルまでは監視対象かもしれないのでひとまず触らない)
                     let mut k = 2;
                     while k < clause.literals.len() {
-                        if variables.get(clause.literals[k].index).is_value_assigned(!clause.literals[k].sign) {
+                        if variables.get(clause.literals[k].index).is_assigned_and_is_equal_to(!clause.literals[k].sign)
+                        {
                             clause.literals.swap_remove(k);
                         } else {
                             k += 1;

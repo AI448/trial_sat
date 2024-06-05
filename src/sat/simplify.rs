@@ -2,7 +2,7 @@ use crate::finite_collections::{Array, FiniteMap};
 
 use super::clause_theory::ClauseTheory;
 use super::types::{Literal, Reason, VariableSize};
-use super::variables::{VariableState, Variables};
+use super::variables::{Variable, Variables};
 
 #[derive(Default)]
 pub struct Simplify {
@@ -25,14 +25,8 @@ impl Simplify {
         }
         // 割当レベルの昇順にソート
         clause.sort_by_cached_key(|l| match variables.get(l.index) {
-            VariableState::Assigned { assignment_level, .. } => *assignment_level,
-            VariableState::Unassigned { .. } => VariableSize::MAX,
-            VariableState::TentativelyAssigned { .. } => {
-                unreachable!()
-            }
-            VariableState::Conflicting { .. } => {
-                unreachable!()
-            }
+            Variable::Assigned(assigned_variable) => *assigned_variable.assignment_level(),
+            Variable::Notassigned(..) => VariableSize::MAX,
         });
         //
         self.decision_level_to_min_assignment_level.clear();
@@ -46,14 +40,16 @@ impl Simplify {
                 .reserve(variables.dimension() - self.variable_index_to_redundancy.capacity());
         }
         for literal in clause.iter() {
-            if let VariableState::Assigned { assigned_value, decision_level, assignment_level, .. } =
-                variables.get(literal.index)
-            {
-                debug_assert!(*assigned_value != literal.sign);
-                if *assignment_level
-                    < *self.decision_level_to_min_assignment_level.get(*decision_level).unwrap_or(&VariableSize::MAX)
+            if let Variable::Assigned(variable) = variables.get(literal.index) {
+                debug_assert!(*variable.value() != literal.sign);
+                if *variable.assignment_level()
+                    < *self
+                        .decision_level_to_min_assignment_level
+                        .get(*variable.decision_level())
+                        .unwrap_or(&VariableSize::MAX)
                 {
-                    self.decision_level_to_min_assignment_level.insert(*decision_level, *assignment_level);
+                    self.decision_level_to_min_assignment_level
+                        .insert(*variable.decision_level(), *variable.assignment_level());
                 }
                 self.variable_index_to_redundancy.insert(literal.index, true);
             }
@@ -63,8 +59,8 @@ impl Simplify {
         while k != 0 {
             k -= 1;
             let literal = clause[k];
-            if let VariableState::Assigned { assigned_value, .. } = variables.get(literal.index) {
-                debug_assert!(*assigned_value != literal.sign);
+            if let Variable::Assigned(variable) = variables.get(literal.index) {
+                debug_assert!(*variable.value() != literal.sign);
                 self.variable_index_to_redundancy.remove(literal.index);
                 self.literal_stack.clear();
                 if self.is_redundant(literal.index, variables, theory) {
@@ -83,24 +79,25 @@ impl Simplify {
             return *is_redundant;
         }
         let mut is_redundant = true;
-        if let VariableState::Assigned { assigned_value, decision_level, assignment_level, reason } =
-            variables.get(variable_index)
-        {
-            if *decision_level == 0 {
+        if let Variable::Assigned(variable) = variables.get(variable_index) {
+            if *variable.decision_level() == 0 {
                 // 決定レベルが 0 ならば true
                 is_redundant = true;
-            } else if *assignment_level
-                <= *self.decision_level_to_min_assignment_level.get(*decision_level).unwrap_or(&VariableSize::MAX)
+            } else if *variable.assignment_level()
+                <= *self
+                    .decision_level_to_min_assignment_level
+                    .get(*variable.decision_level())
+                    .unwrap_or(&VariableSize::MAX)
             {
                 // 当該変数の割当レベルが decision_level ごとの最小割当レベル以下ならば false
                 is_redundant = false;
-            } else if let Reason::Decision { .. } = reason {
+            } else if let Reason::Decision { .. } = variable.reason() {
                 // 当該変数が決定変数ならば false
                 is_redundant = false;
-            } else if let Reason::Propagation { .. } = reason {
+            } else if let Reason::Propagation { .. } = variable.reason() {
                 // 当該変数の割当を説明する節を取得
                 self.literal_buffer.clear();
-                theory.explain(variable_index, *assigned_value, *reason, &mut self.literal_buffer);
+                theory.explain(variable_index, *variable.value(), *variable.reason(), &mut self.literal_buffer);
                 // 現在のスタックサイズを取得
                 let n = self.literal_stack.len();
                 // 当該変数以外の変数(当該変数への割当の原因になっている変数)をスタックに積む
